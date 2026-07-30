@@ -1,0 +1,13 @@
+[
+  {
+    "id": "cat-cafe",
+    "name": "猫咖闲聊群",
+    "avatar": "",
+    "type": "group",
+    "members": [
+      "neko-chan",
+      "kitsune",
+      "usagi"
+    ]
+  }
+]

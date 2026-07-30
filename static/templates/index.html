@@ -1,0 +1,555 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NekoChat — 可爱猫娘聊天器</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=ZCOOL+XiaoWei&family=ZCOOL+KuaiLe&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+
+<!-- Particle Canvas -->
+<canvas id="particles"></canvas>
+
+<!-- Overlay for modals -->
+<div id="overlay" class="overlay hidden"></div>
+
+<!-- ========== HEADER ========== -->
+<header id="header">
+  <div class="header-left">
+    <span class="logo-icon">🐱</span>
+    <span class="logo-text">NekoChat</span>
+  </div>
+  <div class="header-right">
+    <button id="btn-new-chat" class="header-btn" title="新建">✨</button>
+    <button id="btn-toggle-sidebar" class="header-btn" title="聊天列表">💬</button>
+    <button id="btn-settings" class="header-btn" title="设置">⚙️</button>
+  </div>
+</header>
+
+<!-- ========== MAIN CONTAINER ========== -->
+<div id="main-container">
+
+  <!-- LEFT PANEL: Chat List / Contacts -->
+  <aside id="left-panel">
+    <div class="panel-tabs">
+      <button class="panel-tab active" data-tab="chats">💬 聊天</button>
+      <button class="panel-tab" data-tab="stories">📖 故事</button>
+      <button class="panel-tab" data-tab="contacts">👥 联系人</button>
+    </div>
+    <div class="panel-search">
+      <input type="text" id="search-input" placeholder="🔍 搜索...">
+    </div>
+    <div id="chat-list-container" class="panel-list">
+      <!-- Chats/Contacts rendered here -->
+    </div>
+  </aside>
+
+  <!-- RIGHT PANEL: Chat Area -->
+  <main id="chat-area">
+
+    <!-- Chat Header -->
+    <div id="chat-header">
+      <div class="chat-header-info">
+        <div id="chat-avatar" class="chat-avatar">🐱</div>
+        <div class="chat-header-text">
+          <div id="chat-title" class="chat-title">Neko酱</div>
+          <div id="chat-subtitle" class="chat-subtitle">在线</div>
+        </div>
+        <span id="chat-mode-badge" class="mode-badge hidden"></span>
+      </div>
+      <div class="chat-header-actions">
+        <button id="btn-album" class="icon-btn hidden" title="相册">📷</button>
+        <button id="btn-diary" class="icon-btn hidden" title="日记">📔</button>
+        <button id="btn-invite-member" class="icon-btn hidden" title="拉人进群">👥➕</button>
+        <button id="btn-chat-menu" class="icon-btn" title="更多">⋮</button>
+      </div>
+    </div>
+
+    <!-- Messages Container -->
+    <div id="messages-container">
+      <!-- Welcome screen -->
+      <div id="welcome-screen" class="welcome">
+        <div class="welcome-icon">🐱</div>
+        <h2>欢迎来到 NekoChat nya~</h2>
+        <p>选择一个角色开始聊天，或者创建一个新的故事吧！</p>
+        <div class="welcome-chars" id="welcome-chars">
+          <!-- Quick start buttons -->
+        </div>
+      </div>
+
+      <!-- Load more button -->
+      <div id="load-more-area" class="load-more hidden">
+        <button id="btn-load-more" class="load-more-btn">↑ 加载更早消息</button>
+      </div>
+
+      <!-- Messages rendered here -->
+      <div id="messages-list"></div>
+
+      <!-- Typing indicator -->
+      <div id="typing-indicator" class="typing hidden">
+        <div class="typing-avatar"></div>
+        <div class="typing-bubble">
+          <span class="typing-dot"></span>
+          <span class="typing-dot"></span>
+          <span class="typing-dot"></span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Input Area -->
+    <div id="input-area">
+      <div class="input-container">
+        <button id="btn-undo" class="at-btn" title="撤销上轮对话">↩️</button>
+        <button id="btn-at-mention" class="at-btn hidden" title="@某人">@</button>
+        <textarea id="message-input" rows="1" placeholder="输入消息... (Enter发送, Shift+Enter换行)"></textarea>
+        <button id="btn-send" class="send-btn" title="发送">❤️</button>
+      </div>
+    </div>
+  </main>
+</div>
+
+<!-- ========== SETTINGS PANEL ========== -->
+<div id="settings-panel" class="slide-panel">
+  <div class="panel-header">
+    <h3>⚙️ 设置</h3>
+    <button id="btn-close-settings" class="close-btn">✕</button>
+  </div>
+  <div class="panel-body">
+
+    <!-- Section: My Profile -->
+    <div class="settings-section">
+      <h4>👤 我的资料</h4>
+      <div class="form-group">
+        <label>昵称</label>
+        <input type="text" id="set-my-name" placeholder="我">
+      </div>
+      <div class="form-group">
+        <label>头像</label>
+        <div class="avatar-upload">
+          <input type="file" id="set-my-avatar-file" accept="image/*" hidden>
+          <button id="btn-upload-my-avatar" class="btn-sm">📷 上传头像</button>
+          <input type="text" id="set-my-avatar" placeholder="或输入图片URL">
+        </div>
+      </div>
+    </div>
+
+    <!-- Section: API -->
+    <div class="settings-section">
+      <h4>🔑 API 设置</h4>
+      <div class="form-group">
+        <label>API Key</label>
+        <div class="input-with-toggle">
+          <input type="password" id="set-api-key" placeholder="sk-...">
+          <button class="toggle-vis" data-target="set-api-key">👁️</button>
+        </div>
+      </div>
+      <div class="form-group">
+        <label>Base URL</label>
+        <input type="text" id="set-base-url" placeholder="https://api.deepseek.com/v1">
+      </div>
+      <div class="form-group">
+        <label>模型</label>
+        <input type="text" id="set-model" placeholder="deepseek-chat">
+      </div>
+      <button id="btn-test-connection" class="btn-sm">🧪 测试连接</button>
+      <span id="test-result" class="test-result"></span>
+    </div>
+
+    <!-- Section: Appearance -->
+    <div class="settings-section">
+      <h4>🎨 外观</h4>
+      <div class="form-group">
+        <label>聊天背景</label>
+        <div class="bg-input-row">
+          <input type="text" id="set-chat-bg" placeholder="输入图片URL">
+          <input type="file" id="set-chat-bg-file" accept="image/*" hidden>
+          <button id="btn-upload-bg" class="btn-sm">📷</button>
+        </div>
+        <div id="bg-preview" class="bg-preview hidden"></div>
+        <button id="btn-crop-global-bg" class="btn-sm hidden" style="margin-top:4px;">✂️ 调整位置</button>
+      </div>
+      <div class="form-group">
+        <label>聊天背景透明度</label>
+        <input type="range" id="set-bg-opacity" min="30" max="95" value="85">
+        <span id="bg-opacity-val">85%</span>
+      </div>
+      <div class="form-group">
+        <label>AI气泡颜色</label>
+        <input type="color" id="set-ai-bubble" value="#EDE4FF">
+      </div>
+      <div class="form-group">
+        <label>用户气泡颜色</label>
+        <input type="color" id="set-user-bubble" value="#FFB6C1">
+      </div>
+      <div class="form-group">
+        <label>字体大小</label>
+        <input type="range" id="set-font-size" min="12" max="20" value="15">
+        <span id="font-size-val">15px</span>
+      </div>
+    </div>
+
+    <!-- Section: History -->
+    <div class="settings-section">
+      <h4>📜 历史</h4>
+      <div class="form-group">
+        <label>每页消息数</label>
+        <input type="number" id="set-page-size" min="5" max="50" value="20">
+      </div>
+      <button id="btn-clear-all-history" class="btn-sm btn-danger">🗑️ 清空所有历史</button>
+    </div>
+
+    <!-- Section: Character Management -->
+    <div class="settings-section">
+      <h4>🤖 角色管理</h4>
+      <div id="char-list-settings"></div>
+      <button id="btn-add-character" class="btn-sm">➕ 新建角色</button>
+    </div>
+
+    <!-- Section: Group Management -->
+    <div class="settings-section">
+      <h4>👥 群组管理</h4>
+      <div id="group-list-settings"></div>
+      <button id="btn-add-group" class="btn-sm">➕ 新建群组</button>
+    </div>
+
+    <!-- Save -->
+    <div class="settings-actions">
+      <button id="btn-reset-all" class="btn-sm btn-danger" style="margin-bottom:12px;">🔄 一键还原初始设置</button>
+      <button id="btn-save-settings" class="btn-primary">💾 保存设置</button>
+    </div>
+  </div>
+</div>
+
+<!-- ========== MODALS ========== -->
+
+<!-- New Chat Menu Modal -->
+<div id="modal-new-chat" class="modal hidden">
+  <div class="modal-content">
+    <div class="modal-header">
+      <h3>✨ 新建</h3>
+      <button class="modal-close" data-close="modal-new-chat">✕</button>
+    </div>
+    <div class="modal-body new-chat-options">
+      <button class="new-chat-option" data-action="new-private">
+        <span class="nco-icon">💬</span>
+        <span class="nco-label">新建私聊</span>
+        <span class="nco-desc">聊天模式</span>
+      </button>
+      <button class="new-chat-option" data-action="new-story">
+        <span class="nco-icon">📖</span>
+        <span class="nco-label">新建故事</span>
+        <span class="nco-desc">故事模式</span>
+      </button>
+      <button class="new-chat-option" data-action="new-group">
+        <span class="nco-icon">👥</span>
+        <span class="nco-label">新建群聊</span>
+        <span class="nco-desc">多角色群聊</span>
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- Private Chat Picker Modal -->
+<div id="modal-private-pick" class="modal hidden">
+  <div class="modal-content">
+    <div class="modal-header">
+      <h3>💬 选择角色</h3>
+      <button class="modal-close" data-close="modal-private-pick">✕</button>
+    </div>
+    <div class="modal-body" id="private-pick-list"></div>
+  </div>
+</div>
+
+<!-- Story Create Modal -->
+<div id="modal-story-create" class="modal hidden">
+  <div class="modal-content">
+    <div class="modal-header">
+      <h3>📖 新建故事</h3>
+      <button class="modal-close" data-close="modal-story-create">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="form-group">
+        <label>选择角色（可多选）</label>
+        <div id="story-char-pick" class="char-check-list"></div>
+      </div>
+      <div class="form-group">
+        <label>故事标题</label>
+        <input type="text" id="story-title" placeholder="给故事起个名字...">
+      </div>
+      <div class="form-group">
+        <label>背景故事 / 世界观设定</label>
+        <textarea id="story-background" rows="4" placeholder="描述故事的世界观、场景、初始设定...&#10;例如：你是一个在魔法学院上学的新生，今天是你第一天到校..."></textarea>
+      </div>
+      <div class="form-group">
+        <label>叙事风格（可选）</label>
+        <select id="story-style">
+          <option value="自然流畅">自然流畅</option>
+          <option value="轻松欢快">轻松欢快</option>
+          <option value="史诗奇幻">史诗奇幻</option>
+          <option value="温馨日常">温馨日常</option>
+          <option value="悬疑惊悚">悬疑惊悚</option>
+          <option value="浪漫唯美">浪漫唯美</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>聊天背景（可选）</label>
+        <div class="avatar-upload">
+          <input type="text" id="story-bg" placeholder="背景图URL或留空使用默认">
+          <input type="file" id="story-bg-file" accept="image/*" hidden>
+          <button id="btn-upload-story-bg" class="btn-sm">📷</button>
+        </div>
+      </div>
+      <button id="btn-create-story" class="btn-primary">✨ 开始故事</button>
+    </div>
+  </div>
+</div>
+
+<!-- Group Create Modal -->
+<div id="modal-group-create" class="modal hidden">
+  <div class="modal-content">
+    <div class="modal-header">
+      <h3>👥 新建群聊</h3>
+      <button class="modal-close" data-close="modal-group-create">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="form-group">
+        <label>群名称</label>
+        <input type="text" id="group-name" placeholder="给群起个名字...">
+      </div>
+      <div class="form-group">
+        <label>群头像</label>
+        <div class="avatar-upload">
+          <input type="text" id="group-avatar" placeholder="👥 或留空使用默认">
+          <input type="file" id="group-avatar-file" accept="image/*" hidden>
+          <button id="btn-upload-group-avatar" class="btn-sm">📷 上传</button>
+        </div>
+      </div>
+      <div class="form-group">
+        <label>选择成员（至少2个）</label>
+        <div id="group-char-pick" class="char-check-list"></div>
+      </div>
+      <button id="btn-create-group" class="btn-primary">✨ 创建群聊</button>
+    </div>
+  </div>
+</div>
+
+<!-- Invite Member Modal -->
+<div id="modal-invite-member" class="modal hidden">
+  <div class="modal-content">
+    <div class="modal-header">
+      <h3>👥➕ 拉人进群</h3>
+      <button class="modal-close" data-close="modal-invite-member">✕</button>
+    </div>
+    <div class="modal-body">
+      <p style="color:var(--text-secondary);margin-bottom:12px;font-size:var(--font-size-sm);">
+        选择要加入群聊的角色：
+      </p>
+      <div id="invite-char-pick" class="char-check-list"></div>
+      <button id="btn-confirm-invite" class="btn-primary" style="margin-top:16px;width:100%;">✨ 拉入群聊</button>
+    </div>
+  </div>
+</div>
+
+<!-- Character Edit Modal -->
+<div id="modal-char-edit" class="modal hidden">
+  <div class="modal-content">
+    <div class="modal-header">
+      <h3 id="char-edit-title">🤖 编辑角色</h3>
+      <button class="modal-close" data-close="modal-char-edit">✕</button>
+    </div>
+    <div class="modal-body">
+      <input type="hidden" id="char-edit-id">
+      <div class="form-group">
+        <label>角色名</label>
+        <input type="text" id="char-edit-name" placeholder="角色名">
+      </div>
+      <div class="form-group">
+        <label>头像</label>
+        <div class="avatar-upload">
+          <input type="text" id="char-edit-avatar" placeholder="🐱 或留空使用默认">
+          <input type="file" id="char-edit-avatar-file" accept="image/*" hidden>
+          <button id="btn-upload-char-avatar" class="btn-sm">📷 上传</button>
+        </div>
+      </div>
+      <div class="form-group">
+        <label>性格描述 (System Prompt)</label>
+        <textarea id="char-edit-prompt" rows="5" placeholder="描述角色的性格、说话方式..."></textarea>
+      </div>
+      <div class="form-group">
+        <label>温度 (0-2)</label>
+        <input type="range" id="char-edit-temp" min="0" max="2" step="0.05" value="0.9">
+        <span id="char-temp-val">0.9</span>
+      </div>
+      <div class="form-group">
+        <label>专属聊天背景</label>
+        <div class="bg-input-row">
+          <input type="text" id="char-edit-bg" placeholder="留空使用全局背景">
+          <input type="file" id="char-edit-bg-file" accept="image/*" hidden>
+          <button id="btn-upload-char-bg" class="btn-sm">📷</button>
+        </div>
+        <div id="char-bg-preview" class="bg-preview hidden"></div>
+      </div>
+      <div class="modal-actions">
+        <button id="btn-delete-char" class="btn-danger" style="display:none;">🗑️ 删除</button>
+        <button id="btn-save-char" class="btn-primary">💾 保存</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Chat Menu Dropdown -->
+<div id="chat-menu-dropdown" class="dropdown hidden">
+  <button data-action="export-chat">📥 导出对话</button>
+  <button data-action="import-chat">📤 导入对话</button>
+  <button data-action="clear-chat">🗑️ 清空聊天</button>
+  <button data-action="delete-chat">❌ 删除对话</button>
+</div>
+<input type="file" id="import-file-input" accept=".txt" hidden>
+
+<!-- Image Gallery Picker Modal -->
+<div id="modal-gallery" class="modal hidden">
+  <div class="modal-content" style="max-width:560px;">
+    <div class="modal-header">
+      <h3>🖼️ 选择图片</h3>
+      <button class="modal-close" data-close="modal-gallery">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="form-group" style="margin-bottom:12px;">
+        <select id="gallery-type-filter">
+          <option value="backgrounds">聊天背景</option>
+          <option value="avatars">头像</option>
+        </select>
+      </div>
+      <div id="gallery-grid" style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;max-height:300px;overflow-y:auto;"></div>
+      <p id="gallery-empty" style="text-align:center;color:var(--text-secondary);padding:20px;" class="hidden">还没有上传图片nya~</p>
+    </div>
+  </div>
+</div>
+
+<!-- Album Modal -->
+<div id="modal-album" class="modal hidden">
+  <div class="modal-content" style="max-width:560px;">
+    <div class="modal-header">
+      <h3 id="album-title">📷 相册</h3>
+      <button class="modal-close" data-close="modal-album">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="form-group" style="display:flex;gap:8px;">
+        <input type="text" id="album-url" placeholder="图片URL或从🖼️选择" style="flex:1;">
+        <button id="btn-album-gallery" class="btn-sm">🖼️</button>
+        <button id="btn-album-upload" class="btn-sm">📤</button>
+        <input type="file" id="album-upload-file" accept="image/*" hidden>
+      </div>
+      <div class="form-group">
+        <input type="text" id="album-caption" placeholder="说点什么...">
+      </div>
+      <button id="btn-add-photo" class="btn-primary" style="width:100%;margin-bottom:12px;">✨ 添加到相册</button>
+      <div id="album-grid" style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;max-height:400px;overflow-y:auto;"></div>
+      <p id="album-empty" style="text-align:center;color:var(--text-secondary);padding:20px;" class="hidden">相册还是空的nya~ 添加第一张照片吧！</p>
+    </div>
+  </div>
+</div>
+
+<!-- Diary Viewer Modal -->
+<div id="modal-diary" class="modal hidden">
+  <div class="modal-content" style="max-width:600px;">
+    <div class="modal-header">
+      <h3>📔 日记本</h3>
+      <button class="modal-close" data-close="modal-diary">✕</button>
+    </div>
+    <div class="modal-body">
+      <div id="diary-list" style="display:flex;flex-direction:column;gap:12px;max-height:50vh;overflow-y:auto;"></div>
+      <p id="diary-empty" style="text-align:center;color:var(--text-secondary);padding:20px;">还没有日记nya~ 聊够一定轮数会自动生成，也可以手动生成 ✨</p>
+      <button id="btn-manual-diary" class="btn-primary" style="width:100%;margin-top:12px;">✍️ 手动生成日记</button>
+    </div>
+  </div>
+</div>
+
+<!-- Diary Share Picker Modal -->
+<div id="modal-diary-share" class="modal hidden">
+  <div class="modal-content" style="max-width:400px;">
+    <div class="modal-header">
+      <h3>📤 分享日记给...</h3>
+      <button class="modal-close" data-close="modal-diary-share">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="contact-section-title">💬 私聊</div>
+      <div id="share-private-list"></div>
+      <div class="contact-section-title" style="margin-top:12px;">👥 群聊</div>
+      <div id="share-group-list"></div>
+    </div>
+  </div>
+</div>
+
+<!-- Diary Settings Modal -->
+<div id="modal-diary-settings" class="modal hidden">
+  <div class="modal-content" style="max-width:440px;">
+    <div class="modal-header">
+      <h3>📔 日记设置</h3>
+      <button class="modal-close" data-close="modal-diary-settings">✕</button>
+    </div>
+    <div class="modal-body">
+      <input type="hidden" id="diary-edit-id">
+      <div class="form-group">
+        <label>日记背景</label>
+        <div class="bg-input-row">
+          <input type="text" id="diary-edit-bg" placeholder="留空使用默认">
+          <button id="btn-diary-bg-gallery" class="btn-sm">🖼️</button>
+        </div>
+        <div id="diary-bg-preview" class="bg-preview hidden"></div>
+      </div>
+      <div class="form-group">
+        <label>可见角色（不选=仅自己可见）</label>
+        <div id="diary-visible-pick" class="char-check-list"></div>
+      </div>
+      <button id="btn-save-diary-settings" class="btn-primary" style="width:100%;">💾 保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- Image Crop/Position Modal -->
+<div id="modal-crop" class="modal hidden">
+  <div class="modal-content" style="max-width:480px;">
+    <div class="modal-header">
+      <h3>✂️ 裁剪图片</h3>
+      <button class="modal-close close-btn">✕</button>
+    </div>
+    <div class="modal-body" style="text-align:center;">
+      <p style="font-size:var(--font-size-sm);color:var(--text-secondary);margin-bottom:8px;">
+        拖动图片调整位置，滚轮缩放
+      </p>
+      <div id="crop-frame">
+        <div id="crop-inner"></div>
+      </div>
+      <div style="margin-top:10px;display:flex;gap:8px;justify-content:center;align-items:center;">
+        <input type="range" id="crop-zoom" min="30" max="300" value="100" style="width:150px;">
+        <span id="crop-zoom-val">100%</span>
+      </div>
+      <button id="btn-crop-confirm" class="btn-primary" style="width:100%;margin-top:10px;">✅ 确认裁剪</button>
+    </div>
+  </div>
+</div>
+
+<!-- Avatar Preview Overlay -->
+<div id="avatar-preview-overlay" class="avatar-preview-overlay hidden">
+  <div id="avatar-preview-content" class="avatar-preview-content"></div>
+</div>
+
+<!-- Toast -->
+<div id="toast" class="toast hidden"></div>
+
+<script src="/static/js/app.js"></script>
+<script src="/static/js/chatlist.js"></script>
+<script src="/static/js/chat.js"></script>
+<script src="/static/js/contacts.js"></script>
+<script src="/static/js/settings.js"></script>
+<script src="/static/js/particles.js"></script>
+<script src="/static/js/gallery.js"></script>
+<script src="/static/js/crop.js"></script>
+<script src="/static/js/diary.js"></script>
+</body>
+</html>

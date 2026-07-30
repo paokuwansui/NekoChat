@@ -1,0 +1,10 @@
+{
+  "api_key": "",
+  "base_url": "https://api.deepseek.com/v1",
+  "model": "deepseek-chat",
+  "chat_background": "",
+  "ai_bubble_color": "#EDE4FF",
+  "user_bubble_color": "#FFB6C1",
+  "font_size": 15,
+  "messages_per_page": 20
+}
