@@ -4,6 +4,7 @@
 import json
 import os
 import re
+import random
 import time
 import threading
 import uuid
@@ -96,6 +97,8 @@ def get_user_name():
 def read_history(chat_id):
     """读取聊天历史消息列表"""
     user_name = get_user_name()
+    chars = read_json(DATA_DIR / "characters.json", [])
+    name_to_id = {c["name"]: c["id"] for c in chars}
     path = get_history_path(chat_id)
     if not path.exists():
         return []
@@ -113,6 +116,9 @@ def read_history(chat_id):
                 msg = {"role": role, "content": content, "timestamp": timestamp}
                 if role == "assistant" and speaker != "AI":
                     msg["character_name"] = speaker
+                    cid = name_to_id.get(speaker)
+                    if cid:
+                        msg["character_id"] = cid
                 messages.append(msg)
     return messages
 
@@ -246,6 +252,10 @@ def index():
 def serve_upload(filename):
     return send_from_directory(str(UPLOADS_DIR), filename)
 
+@app.route("/music/<path:filename>")
+def serve_music(filename):
+    return send_from_directory(str(MUSIC_DIR), filename)
+
 
 # ─── settings ───────────────────────────────────────────────────
 
@@ -373,7 +383,7 @@ def chats_list():
     return jsonify(chats)
 
 
-@app.route("/api/chats/<chat_id>", methods=["GET", "DELETE"])
+@app.route("/api/chats/<chat_id>", methods=["GET", "DELETE", "PUT"])
 def chat_detail(chat_id):
     if request.method == "DELETE":
         # 删除聊天索引
@@ -384,7 +394,29 @@ def chat_detail(chat_id):
         hist_path = get_history_path(chat_id)
         if hist_path.exists():
             hist_path.unlink()
+        # 删除相册文件
+        ALBUMS_DIR.mkdir(parents=True, exist_ok=True)
+        album_path = ALBUMS_DIR / f"{chat_id}.json"
+        if album_path.exists():
+            album_path.unlink()
+        # 删除日记计数器
+        counters = read_json(DIARY_COUNTERS, {})
+        if chat_id in counters:
+            del counters[chat_id]
+            write_json(DIARY_COUNTERS, counters)
         return jsonify({"status": "ok"})
+    elif request.method == "PUT":
+        # 更新聊天元数据（故事/群聊设置）
+        data = request.get_json(force=True)
+        entry = get_chat_index(chat_id)
+        if not entry:
+            return jsonify({"error": "not found"}), 404
+        for key in ("title", "story_background", "narrative_style",
+                     "chat_background", "story_avatar", "story_chars"):
+            if key in data:
+                entry[key] = data[key]
+        upsert_chat_index(entry)
+        return jsonify({"status": "ok", "chat": entry})
     else:
         # 分页加载历史消息
         offset = request.args.get("offset", 0, type=int)
@@ -464,7 +496,47 @@ def undo_last_round(chat_id):
                 entry["last_message"] = msgs[-1]["content"][:80]
             upsert_chat_index(entry)
 
+    # Decrement diary counter on undo (one round removed)
+    counters = read_json(DIARY_COUNTERS, {})
+    if chat_id in counters:
+        counters[chat_id]["counter"] = max(0, counters[chat_id]["counter"] - 1)
+        write_json(DIARY_COUNTERS, counters)
+
     return jsonify({"status": "ok", "removed": removed})
+
+
+# ─── chat registration (no AI call) ────────────────────────────
+
+@app.route("/api/chats/register", methods=["POST"])
+def chat_register():
+    """Register a new chat in the index without triggering AI."""
+    data = request.get_json(force=True)
+    chat_id = data.get("chat_id", "")
+    chat_type = data.get("type", "private")
+    mode = data.get("mode", "chat")
+    target_id = data.get("target_id", "")
+    
+    if not chat_id:
+        return jsonify({"error": "缺少chat_id"}), 400
+
+    entry = {
+        "chat_id": chat_id,
+        "type": chat_type,
+        "mode": mode,
+        "target_id": target_id,
+        "last_message": "",
+        "last_time": datetime.now().isoformat(),
+        "message_count": 0
+    }
+    if chat_type == "story" or mode == "story":
+        entry["title"] = data.get("title", chat_id)
+        entry["story_background"] = data.get("story_background", "")
+        entry["narrative_style"] = data.get("narrative_style", "")
+        entry["chat_background"] = data.get("chat_background", "")
+        entry["story_avatar"] = data.get("story_avatar", "")
+        entry["story_chars"] = data.get("story_chars", [])
+    upsert_chat_index(entry)
+    return jsonify({"status": "ok", "chat_id": chat_id})
 
 
 # ─── chat (private + story) ─────────────────────────────────────
@@ -515,24 +587,26 @@ def chat_private():
                         pass
                 yield chunk
             # 保存 AI 回复到历史
+            char_name = character["name"]
             if full_response:
-                char_name = character["name"]
                 append_to_history(chat_id, full_response, char_name)
-                # 更新聊天索引
-                chat_entry = {
-                    "chat_id": chat_id,
-                    "type": "story" if mode == "story" else "private",
-                    "mode": mode,
-                    "target_id": character_id,
-                    "last_message": full_response[:80],
-                    "last_time": datetime.now().isoformat(),
-                    "message_count": len(read_history(chat_id))
-                }
-                if mode == "story":
-                    chat_entry["title"] = data.get("title", chat_id)
-                    chat_entry["story_background"] = data.get("story_background", "")
-                    chat_entry["narrative_style"] = data.get("narrative_style", "")
-                upsert_chat_index(chat_entry)
+            # 始终更新聊天索引（包括空回复/初始化）
+            chat_entry = {
+                "chat_id": chat_id,
+                "type": "story" if mode == "story" else "private",
+                "mode": mode,
+                "target_id": character_id,
+                "last_message": full_response[:80] if full_response else "",
+                "last_time": datetime.now().isoformat(),
+                "message_count": len(read_history(chat_id))
+            }
+            if mode == "story":
+                chat_entry["title"] = data.get("title", chat_id)
+                chat_entry["story_background"] = data.get("story_background", "")
+                chat_entry["narrative_style"] = data.get("narrative_style", "")
+                chat_entry["chat_background"] = data.get("chat_background", "")
+                chat_entry["story_chars"] = data.get("story_chars", [])
+            upsert_chat_index(chat_entry)
         except requests.exceptions.RequestException as e:
             yield f"data: {json.dumps({'error': str(e)}, ensure_ascii=False)}\n\n"
         except GeneratorExit:
@@ -550,6 +624,42 @@ def chat_private():
 
 
 # ─── group chat ─────────────────────────────────────────────────
+
+def _call_ai_nonstream(api_key, base_url, model, messages, temperature=0.9):
+    """调用AI API，非流式，返回完整文本"""
+    url = f"{base_url.rstrip('/')}/chat/completions"
+    resp = requests.post(url,
+        headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+        json={"model": model, "messages": messages, "temperature": temperature},
+        timeout=(10, 120))
+    resp.raise_for_status()
+    return resp.json()["choices"][0]["message"]["content"]
+
+
+def _extract_json(text):
+    """从AI回复中提取JSON对象"""
+    text = text.strip()
+    # 去掉可能的 markdown code block
+    if text.startswith("```"):
+        lines = text.split("\n")
+        text = "\n".join(lines[1:]) if len(lines) > 1 else text
+        if text.endswith("```"):
+            text = text[:-3]
+        text = text.strip()
+    # 找到第一个 { 和对应的 }
+    start = text.find("{")
+    if start < 0:
+        raise ValueError("No JSON found in response")
+    depth = 0
+    for i in range(start, len(text)):
+        if text[i] == "{":
+            depth += 1
+        elif text[i] == "}":
+            depth -= 1
+            if depth == 0:
+                return json.loads(text[start:i+1])
+    raise ValueError("Unmatched braces in response")
+
 
 @app.route("/api/chat/group", methods=["POST"])
 def chat_group():
@@ -569,158 +679,137 @@ def chat_group():
     # 保存用户消息
     append_to_history(chat_id, message, get_user_name())
 
-    # 检测 @
+    # 检测 @ → 确定回复者
     mentioned = extract_mentions(message, group)
-
-    # 确定回复者
-    if mentioned:
-        responder_ids = mentioned
-    else:
-        responder_ids = group.get("members", [])[:3]
-
+    responder_ids = mentioned if mentioned else group.get("members", [])
     responders = [c for cid in responder_ids if (c := get_character(cid))]
     if not responders:
         return jsonify({"error": "没有可回复的角色"}), 400
 
-    # Clean deleted members from group
-    valid_ids = {c["id"] for c in responders}
-    if set(group.get("members", [])) != valid_ids & set(group.get("members", [])):
-        # Some members deleted — update group
-        group["members"] = [m for m in group.get("members", []) if m in valid_ids or get_character(m)]
-        groups = read_json(DATA_DIR / "groups.json", [])
-        for i, g in enumerate(groups):
-            if g["id"] == group_id:
-                groups[i] = group
-                write_json(DATA_DIR / "groups.json", groups)
-                break
+    # 构建成员描述 + 历史文本
+    all_chars_desc = "\n".join(
+        f"- {c['name']} (id: {c['id']})：{c['system_prompt']}" for c in responders
+    )
+    names = "、".join(c["name"] for c in responders)
 
-    # Build member names for prompt
-    member_names = ", ".join(c["name"] for c in responders)
-
-    # Shared context — grows as each character replies
-    shared_context = []
+    history_text = ""
     for h in history[-10:]:
-        role = "assistant" if h.get("role") == "assistant" else "user"
-        speaker = h.get("character_name", "我" if role == "user" else "AI")
-        shared_context.append({"role": role, "content": f"{speaker}：{h['content']}"})
-    shared_context.append({"role": "user", "content": f"我：{message}"})
+        speaker = h.get("character_name", "我" if h.get("role") == "user" else "AI")
+        history_text += f"{speaker}：{h['content']}\n"
+    history_text += f"我：{message}\n"
 
-    # Sequential processing — each character sees previous replies
-    import queue as qmod
-    result_queue = qmod.Queue()
-    all_responses = {}
+    # 构建一次性 prompt
+    prompt = (
+        f"【群聊信息】\n"
+        f"群名：{group['name']}\n\n"
+        f"【成员角色设定】\n"
+        f"{all_chars_desc}\n"
+        f"【群聊规则】\n"
+        f"- 用各自角色身份自然参与讨论，回复简短（2-4句话）\n"
+        f"- 可以直接对话，也可以用 @名字 来点名某人\n\n"
+        f"【本次需要回复的成员】（共{len(responders)}人）\n"
+        f"{names}\n\n"
+        f"【聊天记录】\n"
+        f"{history_text}\n"
+        f"【输出要求】\n"
+        f"请以JSON格式一次性输出所有成员的回复。回复顺序要随机（不要按名字字母序）。\n"
+        f"严格按照以下JSON格式，只输出JSON，不要输出其他内容：\n"
+        f'{{"replies": ['
+        + ",".join(f'{{"id": "{c["id"]}", "content": "...（{c["name"]}的回复，不要带角色名前缀）"}}' for c in responders)
+        + f']}}'
+    )
 
-    def process_sequential():
-        for idx, char in enumerate(responders):
-            # Build system prompt with interaction awareness
-            others = [c["name"] for c in responders if c["id"] != char["id"]]
-            others_str = "、".join(others) if others else "其他人"
-            system_prompt = (
-                f"你是{char['name']}，{char['system_prompt']}\n\n"
-                f"你正在一个名叫\"{group['name']}\"的群聊中。群里还有：{others_str}。\n"
-                f"群聊规则：\n"
-                f"- 用你的角色身份自然地参与群聊讨论\n"
-                f"- 可以回应群友说的话，也可以接话、吐槽、赞同或反驳\n"
-                f"- 像真实群聊一样互动，不要只回复用户一个人\n"
-                f"- 回复要简短自然（2-4句话为宜）\n"
-                f"- 如果有人@你，要认真回复"
-            )
-
-            # Build context including previous responders' messages
-            ctx = [{"role": "system", "content": system_prompt}]
-            ctx.extend(shared_context)
-
-            temperature = char.get("temperature", 0.9)
-            full = ""
-            try:
-                gen = stream_ai_response(ctx, api_key, base_url, model, system_prompt, temperature)
-                for chunk in gen:
-                    if chunk.startswith("data: ") and "[DONE]" not in chunk:
-                        try:
-                            d = json.loads(chunk[6:].strip())
-                            delta = d.get("delta", "")
-                            full += delta
-                            result_queue.put({
-                                "character_id": char["id"],
-                                "character_name": char["name"],
-                                "delta": delta
-                            })
-                        except json.JSONDecodeError:
-                            pass
-                result_queue.put({"character_id": char["id"], "done": True})
-            except Exception as e:
-                result_queue.put({"character_id": char["id"], "error": str(e), "done": True})
-
-            all_responses[char["id"]] = full
-
-            # Strip any accidental name prefix the AI imitated
-            for prefix in [f"[{char['name']}]:", f"{char['name']}：", f"{char['name']}:"]:
-                if full.startswith(prefix):
-                    full = full[len(prefix):].strip()
-                    all_responses[char["id"]] = full
-                    break
-
-            # Add this character's response to shared context
-            if full:
-                shared_context.append({
-                    "role": "assistant",
-                    "content": f"{char['name']}：{full}"
-                })
-
-        # Save all responses to history
-        for char in responders:
-            full = all_responses.get(char["id"], "")
-            if full:
-                append_to_history(chat_id, full, char["name"])
-
-        # Update chat index
-        last_msg = next(
-            (all_responses.get(c["id"], "") for c in responders if all_responses.get(c["id"], "")),
-            message
-        )
-        chat_entry = {
-            "chat_id": chat_id,
-            "type": "group",
-            "mode": "chat",
-            "target_id": group_id,
-            "last_message": f"{responders[0]['name']}: {last_msg[:50]}" if responders else last_msg[:80],
-            "last_time": datetime.now().isoformat(),
-            "message_count": len(read_history(chat_id))
-        }
-        upsert_chat_index(chat_entry)
-        result_queue.put({"done_all": True})
-
-    # Run sequential processing in background thread
-    thread = threading.Thread(target=process_sequential, daemon=True)
-    thread.start()
+    msg_count = len(read_history(chat_id))
 
     def generate():
-        while True:
-            item = result_queue.get()
-            if item.get("done_all"):
-                yield "data: [DONE]\n\n"
-                break
-            elif item.get("done"):
-                pass  # individual character done — just continue
-            elif item.get("error"):
-                yield f"data: {json.dumps({'character_id': item['character_id'], 'error': item['error']}, ensure_ascii=False)}\n\n"
-            else:
-                yield f"data: {json.dumps(item, ensure_ascii=False)}\n\n"
+        all_replies = []
+        try:
+            # 第1步：调用AI（非流式，一次性拿JSON）
+            full = _call_ai_nonstream(api_key, base_url, model,
+                [{"role": "user", "content": prompt}], 0.9)
+            parsed = _extract_json(full)
+            raw_replies = parsed.get("replies", [])
+        except Exception as e:
+            yield f"data: {json.dumps({'error': f'AI回复解析失败: {e}'}, ensure_ascii=False)}\n\n"
+            yield "data: [DONE]\n\n"
+            return
+
+        # 第2步：随机打乱顺序
+        random.shuffle(raw_replies)
+
+        # 第3步：逐条推送（带延时，模拟逐人回复）
+        for r in raw_replies:
+            char = get_character(r.get("id", ""))
+            content = (r.get("content") or "").strip()
+            if not char or not content:
+                continue
+
+            # 去除AI可能带的名字前缀
+            for prefix in [f"[{char['name']}]:", f"{char['name']}：", f"{char['name']}:"]:
+                if content.startswith(prefix):
+                    content = content[len(prefix):].strip()
+                    break
+
+            # 随机延时 1~2.5s
+            time.sleep(random.uniform(1.0, 2.5))
+
+            yield f"data: {json.dumps({'character_id': char['id'], 'character_name': char['name'], 'delta': content}, ensure_ascii=False)}\n\n"
+            yield f"data: {json.dumps({'character_id': char['id'], 'done': True}, ensure_ascii=False)}\n\n"
+
+            append_to_history(chat_id, content, char["name"])
+            all_replies.append({"id": char["id"], "name": char["name"], "content": content})
+
+        # 第4步：检测@提及 → 二次请求
+        chars_all = read_json(DATA_DIR / "characters.json", [])
+        name_to_id = {c["name"]: c["id"] for c in chars_all}
+        for reply in all_replies:
+            for name, cid in name_to_id.items():
+                if f"@{name}" in reply["content"] and cid != reply["id"]:
+                    target = get_character(cid)
+                    if not target:
+                        continue
+                    at_prompt = (
+                        f"【上文】\n"
+                        f"{reply['name']}：{reply['content']}\n\n"
+                        f"【被@的人】\n"
+                        f"{name} 被 @了，请以 {name} 的身份简短回复（2-3句话，不要带角色名前缀）\n\n"
+                        f"只输出JSON：{{\"content\": \"回复内容\"}}"
+                    )
+                    try:
+                        at_full = _call_ai_nonstream(api_key, base_url, model,
+                            [{"role": "user", "content": at_prompt}], 0.9)
+                        at_json = _extract_json(at_full)
+                        at_content = (at_json.get("content") or "").strip()
+                        if at_content:
+                            time.sleep(random.uniform(1.0, 2.5))
+                            yield f"data: {json.dumps({'character_id': cid, 'character_name': name, 'delta': at_content}, ensure_ascii=False)}\n\n"
+                            yield f"data: {json.dumps({'character_id': cid, 'done': True}, ensure_ascii=False)}\n\n"
+                            append_to_history(chat_id, at_content, name)
+                    except Exception:
+                        pass
+
+        # 更新聊天索引
+        last = all_replies[-1] if all_replies else None
+        chat_entry = {
+            "chat_id": chat_id, "type": "group", "mode": "chat",
+            "target_id": group_id,
+            "last_message": f"{last['name']}: {last['content'][:50]}" if last else message[:80],
+            "last_time": datetime.now().isoformat(),
+            "message_count": msg_count + sum(1 for _ in all_replies)
+        }
+        upsert_chat_index(chat_entry)
+        yield "data: [DONE]\n\n"
 
     return Response(
         stream_with_context(generate()),
         mimetype="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "X-Accel-Buffering": "no",
-            "Connection": "keep-alive"
-        }
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no", "Connection": "keep-alive"}
     )
 
 
 # ─── upload ─────────────────────────────────────────────────────
 
-ALLOWED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".gif", ".webp"}
+ALLOWED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".webm", ".mp4", ".mp3", ".wav", ".ogg"}
 MAX_UPLOAD_SIZE = 10 * 1024 * 1024  # 10MB
 
 
@@ -781,6 +870,55 @@ def uploads_list():
     return jsonify(images)
 
 
+@app.route("/api/uploads/cleanup", methods=["POST"])
+def uploads_cleanup():
+    """Delete unreferenced uploaded files."""
+    # Collect all referenced paths from data files
+    import glob as _glob
+    refs = set()
+
+    # Scan all JSON data files for /uploads/ references
+    for json_file in _glob.glob(str(DATA_DIR / "*.json")):
+        try:
+            content = Path(json_file).read_text(encoding="utf-8")
+            for match in re.finditer(r'"/uploads/([^"]+)"', content):
+                refs.add(f"/uploads/{match.group(1)}")
+            # Also match single-quoted
+            for match in re.finditer(r"'/uploads/([^']+)'", content):
+                refs.add(f"/uploads/{match.group(1)}")
+        except Exception:
+            pass
+
+    # Also scan all album and diary JSONs
+    for subdir in ("albums", "diaries"):
+        subpath = DATA_DIR / subdir
+        if subpath.exists():
+            for f in subpath.glob("*.json"):
+                try:
+                    content = f.read_text(encoding="utf-8")
+                    for match in re.finditer(r'"/uploads/([^"]+)"', content):
+                        refs.add(f"/uploads/{match.group(1)}")
+                    for match in re.finditer(r"'/uploads/([^']+)'", content):
+                        refs.add(f"/uploads/{match.group(1)}")
+                except Exception:
+                    pass
+
+    # Collect all uploaded files
+    deleted = 0
+    for folder_name in ("avatars", "backgrounds"):
+        folder = UPLOADS_DIR / folder_name
+        if not folder.exists():
+            continue
+        for f in folder.iterdir():
+            if f.is_file():
+                file_path = f"/uploads/{folder_name}/{f.name}"
+                if file_path not in refs:
+                    f.unlink()
+                    deleted += 1
+
+    return jsonify({"status": "ok", "deleted": deleted})
+
+
 # ─── photo album CRUD ───────────────────────────────────────────
 
 ALBUMS_DIR = DATA_DIR / "albums"
@@ -817,6 +955,37 @@ def album_delete(char_id, idx):
     return jsonify({"error": "index out of range"}), 400
 
 
+# ─── music ───────────────────────────────────────────────────────
+
+MUSIC_DIR = BASE_DIR / "music"
+
+@app.route("/api/music", methods=["GET"])
+def list_music():
+    """List all music files in the music folder."""
+    MUSIC_DIR.mkdir(parents=True, exist_ok=True)
+    music_exts = {".mp3", ".wav", ".ogg", ".flac", ".m4a", ".webm"}
+    files = []
+    for f in sorted(MUSIC_DIR.iterdir()):
+        if f.suffix.lower() in music_exts:
+            files.append({"name": f.name, "url": f"/music/{f.name}"})
+    return jsonify(files)
+
+@app.route("/api/music", methods=["POST"])
+def upload_music():
+    """Upload music file to the music folder."""
+    MUSIC_DIR.mkdir(parents=True, exist_ok=True)
+    if "file" not in request.files:
+        return jsonify({"status": "error", "message": "没有文件"}), 400
+    file = request.files["file"]
+    if not file.filename:
+        return jsonify({"status": "error", "message": "文件名为空"}), 400
+    ext = Path(file.filename).suffix.lower()
+    if ext not in {".mp3", ".wav", ".ogg", ".flac", ".m4a"}:
+        return jsonify({"status": "error", "message": "不支持的音频格式"}), 400
+    file.save(MUSIC_DIR / file.filename)
+    return jsonify({"status": "ok", "url": f"/music/{file.filename}"})
+
+
 # ─── diary CRUD ─────────────────────────────────────────────────
 
 DIARIES_DIR = DATA_DIR / "diaries"
@@ -838,6 +1007,7 @@ def diaries(chat_id):
         "date": datetime.now().strftime("%Y-%m-%d %H:%M"),
         "content": data.get("content", ""),
         "background": data.get("background", ""),
+        "bg_opacity": data.get("bg_opacity", 85),
         "visible_to": data.get("visible_to", []),
         "message_count": data.get("message_count", 0)
     }
@@ -857,6 +1027,8 @@ def diary_detail(chat_id, diary_id):
             if d["id"] == diary_id:
                 if "background" in data:
                     d["background"] = data["background"]
+                if "bg_opacity" in data:
+                    d["bg_opacity"] = data["bg_opacity"]
                 if "visible_to" in data:
                     d["visible_to"] = data["visible_to"]
                 write_json(path, diary_list)
@@ -867,6 +1039,28 @@ def diary_detail(chat_id, diary_id):
     diary_list = [d for d in diary_list if d["id"] != diary_id]
     write_json(path, diary_list)
     return jsonify({"status": "ok"})
+
+
+@app.route("/api/diaries/visible/<char_id>", methods=["GET"])
+def diaries_visible(char_id):
+    """Return all diary entries visible to the given character across all chats."""
+    DIARIES_DIR.mkdir(parents=True, exist_ok=True)
+    results = []
+    for f in sorted(DIARIES_DIR.glob("*.json")):
+        entries = read_json(f, [])
+        chat_id = f.stem
+        # Find the owner character name
+        char = get_character(chat_id.replace("private_", ""))
+        owner_name = char["name"] if char else chat_id
+        for entry in entries:
+            if char_id in entry.get("visible_to", []):
+                results.append({
+                    "chat_id": chat_id,
+                    "owner_name": owner_name,
+                    "date": entry.get("date", ""),
+                    "content": entry.get("content", "")
+                })
+    return jsonify(results)
 
 
 @app.route("/api/diaries/<chat_id>/generate", methods=["POST"])
@@ -922,6 +1116,7 @@ def diary_generate(chat_id):
             "date": datetime.now().strftime("%Y-%m-%d %H:%M"),
             "content": full.strip(),
             "background": "",
+            "bg_opacity": 85,
             "visible_to": [],
             "message_count": len(messages)
         }
@@ -931,6 +1126,103 @@ def diary_generate(chat_id):
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+
+# ─── diary auto counter ──────────────────────────────────────────
+
+DIARY_COUNTERS = DATA_DIR / "diary_counters.json"
+
+def _get_diary_counter(chat_id):
+    counters = read_json(DIARY_COUNTERS, {})
+    if chat_id not in counters:
+        settings = read_json(DATA_DIR / "settings.json", {})
+        base = settings.get("diary_base", 40)
+        extra = settings.get("diary_random", 20)
+        threshold = base + random.randint(0, max(0, extra))
+        counters[chat_id] = {"counter": 0, "threshold": threshold}
+        write_json(DIARY_COUNTERS, counters)
+    return counters
+
+def _save_diary_counter(chat_id, counter, threshold):
+    counters = read_json(DIARY_COUNTERS, {})
+    counters[chat_id] = {"counter": counter, "threshold": threshold}
+    write_json(DIARY_COUNTERS, counters)
+
+
+@app.route("/api/diaries/tick/<chat_id>", methods=["POST"])
+def diary_tick(chat_id):
+    """Increment diary counter. Auto-generate if threshold reached."""
+    data = request.get_json(force=True) or {}
+    counters = _get_diary_counter(chat_id)
+    c = counters[chat_id]
+    c["counter"] += 1
+
+    if c["counter"] >= c["threshold"] and data.get("api_key"):
+        # Generate diary via AI
+        messages = data.get("messages", [])
+        char_name = data.get("character_name", "AI")
+        api_key = data["api_key"]
+        base_url = data.get("base_url", "https://api.deepseek.com/v1")
+        model = data.get("model", "deepseek-chat")
+
+        system_prompt = (
+            f"你是{char_name}。请以{char_name}的第一人称视角，"
+            f"根据今天的聊天记录写一篇日记（150-300字）。\n"
+            f"日记风格要完全符合{char_name}的性格和说话方式，"
+            f"像{char_name}本人写的日记一样。\n"
+            f"内容包括：今天和主人/朋友聊了什么、有什么有趣的事、{char_name}自己的想法和感受。\n"
+            f"用中文写，保持{char_name}一贯的语气和风格。"
+        )
+
+        ctx = [{"role": "system", "content": system_prompt}]
+        for m in messages[-30:]:
+            role = "user" if m.get("role") == "user" else "assistant"
+            speaker = "主人" if role == "user" else char_name
+            ctx.append({"role": "user", "content": f"[{speaker}]: {m.get('content', '')}"})
+        ctx.append({"role": "user", "content": f"请以{char_name}的口吻，根据以上对话写一篇今天的日记。"})
+
+        try:
+            full = ""
+            gen = stream_ai_response(ctx, api_key, base_url, model, system_prompt, 0.8)
+            for chunk in gen:
+                if chunk.startswith("data: ") and "[DONE]" not in chunk:
+                    try:
+                        d = json.loads(chunk[6:].strip())
+                        full += d.get("delta", "")
+                    except json.JSONDecodeError:
+                        pass
+
+            if full:
+                DIARIES_DIR.mkdir(parents=True, exist_ok=True)
+                path = DIARIES_DIR / f"{chat_id}.json"
+                diary_list = read_json(path, [])
+                entry = {
+                    "id": f"diary_{uuid.uuid4().hex[:10]}",
+                    "date": datetime.now().strftime("%Y-%m-%d %H:%M"),
+                    "content": full.strip(),
+                    "background": "",
+                    "bg_opacity": 85,
+                    "visible_to": [],
+                    "message_count": len(messages)
+                }
+                diary_list.append(entry)
+                write_json(path, diary_list)
+
+                # Reset counter + new random threshold
+                settings = read_json(DATA_DIR / "settings.json", {})
+                base = settings.get("diary_base", 40)
+                extra = settings.get("diary_random", 20)
+                new_threshold = base + random.randint(0, max(0, extra))
+                _save_diary_counter(chat_id, 0, new_threshold)
+                return jsonify({"generated": True, "entry": entry,
+                                "counter": 0, "threshold": new_threshold})
+        except Exception:
+            pass
+
+    # Not yet triggered — save counter
+    _save_diary_counter(chat_id, c["counter"], c["threshold"])
+    return jsonify({"generated": False, "counter": c["counter"],
+                    "threshold": c["threshold"]})
 
 
 # ─── reset to defaults ──────────────────────────────────────────
