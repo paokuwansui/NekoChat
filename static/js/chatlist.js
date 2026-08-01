@@ -40,10 +40,13 @@ function renderStories(container, filter) {
     const isActive = c.chat_id === AppState.activeChat.chat_id;
     const time = formatTime(c.last_time);
     const title = c.title || '未命名故事';
+    const storyAv = c.story_avatar;
+    const avatarHtml = (storyAv && (storyAv.startsWith('/') || storyAv.startsWith('http')))
+      ? getCharAvatar({ id: 'story', avatar: storyAv }) : '📖';
     return `
       <div class="chat-item ${isActive ? 'active' : ''}" data-chat-id="${c.chat_id}"
            onclick="openExistingChat('${c.chat_id}')">
-        <div class="chat-item-avatar">📖</div>
+        <div class="chat-item-avatar">${avatarHtml}</div>
         <div class="chat-item-info">
           <div class="chat-item-name"><span class="story-icon">📖</span> ${escapeHtml(title)}</div>
           <div class="chat-item-preview">${escapeHtml(c.last_message || '')}</div>
@@ -215,13 +218,18 @@ async function openExistingChat(chatId) {
   if (type === 'group') {
     target = AppState.groups.find(g => g.id === chat.target_id);
   } else if (type === 'story') {
+    // Restore story characters from saved ids, fallback to all if missing
+    const savedChars = (chat.story_chars || []).map(sc =>
+      AppState.characters.find(c => c.id === sc.id)
+    ).filter(Boolean);
     target = {
       id: chatId, name: chat.title || '故事',
       _storyBackground: chat.story_background || '',
       _narrativeStyle: chat.narrative_style || '',
       _storyTitle: chat.title || chatId,
       _storyBg: chat.chat_background || '',
-      _storyChars: AppState.characters  // default: all available
+      _storyAvatar: chat.story_avatar || '',
+      _storyChars: savedChars.length > 0 ? savedChars : AppState.characters
     };
   } else {
     target = AppState.characters.find(c => c.id === chat.target_id);

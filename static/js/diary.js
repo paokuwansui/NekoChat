@@ -1,23 +1,27 @@
 /*  NekoChat — diary.js: 日记自动生成 + 查看器 + 设置  */
 
-let _diaryCounter = 0;
-let _diaryThreshold = Math.floor(Math.random() * 21) + 20; // 20-40
-let _diaryChatId = null;
 let _diaryList = [];  // current loaded diaries for sharing by index
 
-// ── Auto-generate check ─────────────────────────
-function checkDiaryAutoGenerate(chatId, messages) {
-  if (_diaryChatId !== chatId) {
-    _diaryChatId = chatId;
-    _diaryCounter = 0;
-    _diaryThreshold = Math.floor(Math.random() * 21) + 20;
-  }
-  _diaryCounter++;
-  if (_diaryCounter >= _diaryThreshold && AppState.settings.api_key) {
-    _diaryCounter = 0;
-    _diaryThreshold = Math.floor(Math.random() * 21) + 20;
-    generateDiary(chatId, messages, true);
-  }
+// ── Auto-generate check (backend counter) ────────
+async function checkDiaryAutoGenerate(chatId, messages) {
+  const ac = AppState.activeChat;
+  try {
+    const resp = await fetch(`/api/diaries/tick/${chatId}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        messages: messages || ac.messages,
+        api_key: AppState.settings.api_key,
+        base_url: AppState.settings.base_url,
+        model: AppState.settings.model,
+        character_name: ac.target?.name || 'AI'
+      })
+    });
+    const data = await resp.json();
+    if (data.generated) {
+      showToast('📔 自动生成了一篇新日记！点📔查看');
+    }
+  } catch {}
 }
 
 // ── Generate Diary ──────────────────────────────
@@ -41,13 +45,12 @@ async function generateDiary(chatId, messages, silent = false) {
     });
     const data = await resp.json();
     if (data.status === 'ok') {
-      if (!silent) showToast('日记生成成功nya~ 📔');
-      else showToast('📔 自动生成了一篇新日记！点📔查看');
+      showToast(silent ? '📔 自动生成了一篇新日记！点📔查看' : '日记生成成功nya~ 📔');
     } else {
-      if (!silent) showToast('生成失败: ' + (data.error || '未知错误'), 'error');
+      showToast('日记生成失败: ' + (data.error || '未知错误'), 'error');
     }
   } catch (e) {
-    if (!silent) showToast('生成失败: ' + e.message, 'error');
+    showToast('日记生成失败: ' + e.message, 'error');
   }
 }
 
@@ -72,13 +75,14 @@ async function openDiary() {
           ? `background-image:url(${d.background});background-size:cover;background-position:center;`
           : '';
         const hasBg = !!d.background;
+        const bgAlpha = (d.bg_opacity != null ? d.bg_opacity : 85) / 100;
         const visibleNames = (d.visible_to || [])
           .map(cid => AppState.characters.find(c => c.id === cid)?.name)
           .filter(Boolean);
 
         return `
           <div class="diary-card" style="${bgStyle}">
-            ${hasBg ? '<div style="position:absolute;inset:0;background:rgba(255,255,255,0.85);border-radius:14px;z-index:0;"></div>' : ''}
+            ${hasBg ? `<div style="position:absolute;inset:0;background:rgba(255,255,255,${bgAlpha});border-radius:14px;z-index:0;"></div>` : ''}
             <div style="position:relative;z-index:1;">
               <div class="diary-date">
                 📅 ${d.date}
@@ -89,7 +93,7 @@ async function openDiary() {
               <div class="diary-content">${escapeHtml(d.content)}</div>
               <div class="diary-actions">
                 <button onclick="shareDiary(${i})">📤 分享</button>
-                <button onclick="openDiarySettings('${d.id}','${escapeHtml(d.background || '')}','${(d.visible_to||[]).join(',')}')">⚙️ 设置</button>
+                <button onclick="openDiarySettings('${d.id}','${escapeHtml(d.background || '')}',${d.bg_opacity != null ? d.bg_opacity : 85},'${(d.visible_to||[]).join(',')}')">⚙️ 设置</button>
                 <button onclick="deleteDiaryEntry('${d.id}')">🗑️ 删除</button>
               </div>
             </div>
@@ -115,10 +119,13 @@ async function deleteDiaryEntry(diaryId) {
 // ── Open Diary Settings ─────────────────────────
 let _diaryEditId = null;
 
-function openDiarySettings(diaryId, bg, visibleTo) {
+function openDiarySettings(diaryId, bg, bgOpacity, visibleTo) {
   _diaryEditId = diaryId;
   document.getElementById('diary-edit-id').value = diaryId;
   document.getElementById('diary-edit-bg').value = bg || '';
+  const opVal = bgOpacity != null ? bgOpacity : 85;
+  document.getElementById('diary-bg-opacity').value = opVal;
+  document.getElementById('diary-bg-opacity-val').textContent = opVal + '%';
   updateDiaryBgPreview();
 
   // Render visibility checkboxes
@@ -192,8 +199,20 @@ async function shareToPrivate(charId) {
   const char = AppState.characters.find(c => c.id === charId);
   if (!char) return;
   const originalCharName = AppState.activeChat.target?.name || '';
+  const chatId = `private_${charId}`;
   closeModal('modal-diary-share');
-  await switchToChat(`private_${charId}`, 'private', 'chat', char);
+
+  // Optimistic: add chat to sidebar immediately (if not already there)
+  if (!AppState.chats.find(c => c.chat_id === chatId)) {
+    AppState.chats.unshift({
+      chat_id: chatId, type: 'private', mode: 'chat',
+      target_id: charId, last_message: '', last_time: new Date().toISOString(),
+      message_count: 0
+    });
+    renderChatList();
+  }
+
+  await switchToChat(chatId, 'private', 'chat', char);
   document.getElementById('message-input').value = `📔 分享了${originalCharName}的日记 (${d.date})\n\n${d.content}`;
   document.getElementById('btn-send').click();
 }
@@ -204,8 +223,20 @@ async function shareToGroup(groupId) {
   const group = AppState.groups.find(g => g.id === groupId);
   if (!group) return;
   const originalCharName = AppState.activeChat.target?.name || '';
+  const chatId = `group_${groupId}`;
   closeModal('modal-diary-share');
-  await switchToChat(`group_${groupId}`, 'group', 'chat', group);
+
+  // Optimistic: add chat to sidebar immediately (if not already there)
+  if (!AppState.chats.find(c => c.chat_id === chatId)) {
+    AppState.chats.unshift({
+      chat_id: chatId, type: 'group', mode: 'chat',
+      target_id: groupId, last_message: '', last_time: new Date().toISOString(),
+      message_count: 0
+    });
+    renderChatList();
+  }
+
+  await switchToChat(chatId, 'group', 'chat', group);
   document.getElementById('message-input').value = `📔 分享了${originalCharName}的日记 (${d.date})\n\n${d.content}`;
   document.getElementById('btn-send').click();
 }
@@ -231,13 +262,32 @@ document.addEventListener('DOMContentLoaded', () => {
     setTimeout(() => openGallery('diary-edit-bg', 'backgrounds'), 200);
   });
 
+  // Diary bg upload
+  document.getElementById('btn-upload-diary-bg')?.addEventListener('click', () => {
+    document.getElementById('diary-edit-bg-file').click();
+  });
+  document.getElementById('diary-edit-bg-file')?.addEventListener('change', async (e) => {
+    uploadWithCrop(e.target, 'diary_bg', (croppedUrl) => {
+      document.getElementById('diary-edit-bg').value = croppedUrl;
+      updateDiaryBgPreview();
+      showToast('背景上传完成 ✨');
+      e.target.value = '';
+    });
+  });
+
+  // Diary bg opacity slider
+  document.getElementById('diary-bg-opacity')?.addEventListener('input', function() {
+    document.getElementById('diary-bg-opacity-val').textContent = this.value + '%';
+  });
+
   // Save diary settings
   document.getElementById('btn-save-diary-settings')?.addEventListener('click', async () => {
     const ac = AppState.activeChat;
     const bg = document.getElementById('diary-edit-bg').value.trim();
+    const bgOpacity = parseInt(document.getElementById('diary-bg-opacity').value);
     const visible = [...document.querySelectorAll('.diary-visible-check:checked')].map(cb => cb.value);
     await apiPut('/api/diaries/' + ac.chat_id + '/' + _diaryEditId, {
-      background: bg, visible_to: visible
+      background: bg, bg_opacity: bgOpacity, visible_to: visible
     });
     closeModal('modal-diary-settings');
     openDiary(); // refresh

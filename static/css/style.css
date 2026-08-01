@@ -11,6 +11,7 @@
   --text-secondary: #9B8A9B;
   --user-bubble: #FFB6C1;
   --ai-bubble: #EDE4FF;
+  --bubble-opacity: 1;
   --accent: #FF7B9C;
   --accent-hover: #FF6088;
   --accent-light: #FFD4E0;
@@ -183,7 +184,7 @@ a { color: var(--accent); text-decoration: none; }
 }
 #chat-area::before {
   content: ''; position: absolute; inset: 0;
-  background: rgba(255,245,247, var(--bg-opacity, 0.85)); z-index: 0;
+  background: rgba(255,240,243, var(--bg-opacity, 0.35)); z-index: 0;
 }
 
 /* Chat Header */
@@ -288,8 +289,9 @@ a { color: var(--accent); text-decoration: none; }
   display: flex; gap: 2px; flex-shrink: 0;
 }
 .msg-avatar-group img, .msg-avatar-group span {
-  width: 24px; height: 24px; border-radius: 50%; object-fit: cover;
-  font-size: 14px; display: flex; align-items: center; justify-content: center;
+  width: 18px !important; height: 18px !important; min-width: 18px; min-height: 18px;
+  border-radius: 50%; object-fit: cover;
+  font-size: 10px; display: flex; align-items: center; justify-content: center;
 }
 
 /* ── Crop Modal ────────────────────────────────── */
@@ -312,19 +314,22 @@ a { color: var(--accent); text-decoration: none; }
 .bubble-user {
   background: var(--user-bubble); color: #5D3A3A;
   border-bottom-right-radius: 6px;
+  opacity: var(--bubble-opacity);
 }
 .bubble-ai {
   background: var(--ai-bubble); color: #4A3A5E;
   border-bottom-left-radius: 6px;
+  opacity: var(--bubble-opacity);
 }
-/* Story mode bubble */
+/* Story mode bubble — follows AI bubble color from settings */
 .bubble-story {
-  background: rgba(255,255,255,0.85);
+  background: var(--ai-bubble);
   border-left: 3px solid var(--accent);
   border-radius: 4px 16px 16px 4px;
   padding: 14px 18px;
   font-style: italic;
   box-shadow: 0 2px 12px rgba(0,0,0,0.06);
+  opacity: var(--bubble-opacity);
 }
 .bubble-story .msg-sender-story {
   font-style: normal; font-weight: bold; color: var(--accent);
@@ -672,6 +677,26 @@ a { color: var(--accent); text-decoration: none; }
   border-radius: 12px; object-fit: contain;
 }
 
+/* Preview nav buttons */
+.preview-nav {
+  position: fixed; top: 50%; transform: translateY(-50%);
+  z-index: 910; width: 48px; height: 48px; border-radius: 50%;
+  background: rgba(255,255,255,0.85); border: none;
+  font-size: 22px; color: #5D4E5D; cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  box-shadow: 0 2px 12px rgba(0,0,0,0.15);
+  transition: background 0.15s, transform 0.15s;
+}
+.preview-nav:hover { background: #fff; transform: translateY(-50%) scale(1.1); }
+.preview-prev { left: 20px; }
+.preview-next { right: 20px; }
+.preview-counter {
+  position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
+  z-index: 910; padding: 6px 18px; border-radius: 20px;
+  background: rgba(0,0,0,0.55); color: #fff;
+  font-size: 14px; pointer-events: none;
+}
+
 /* ── Gallery & Album ────────────────────────── */
 .gallery-img {
   width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 8px;
@@ -683,8 +708,11 @@ a { color: var(--accent); text-decoration: none; }
   position: relative; border-radius: 10px; overflow: hidden;
   aspect-ratio: 1; background: var(--bg-secondary);
 }
-.album-photo img {
-  width: 100%; height: 100%; object-fit: cover;
+.album-photo img, .album-photo video {
+  width: 100%; height: 100%; object-fit: cover; display: block;
+}
+.album-photo audio {
+  width: 100%; margin-top: 30%;
 }
 .album-photo-caption {
   position: absolute; bottom: 0; left: 0; right: 0;

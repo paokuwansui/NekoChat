@@ -33,7 +33,14 @@ function openStoryCreate() {
   document.getElementById('story-background').value = '';
   document.getElementById('story-style').value = '自然流畅';
   document.getElementById('story-bg').value = '';
+  document.getElementById('story-avatar').value = '';
   openModal('modal-story-create');
+  document.getElementById('modal-story-create').querySelector('.modal-header h3').textContent = '📖 新建故事';
+
+  // Reset the create button to its original state
+  const createBtn = document.getElementById('btn-create-story');
+  createBtn.textContent = '✨ 开始故事';
+  createBtn.disabled = false;
 
   // Story bg upload
   document.getElementById('btn-upload-story-bg').onclick = () => {
@@ -43,6 +50,18 @@ function openStoryCreate() {
     uploadWithCrop(e.target, 'background', (croppedUrl) => {
       document.getElementById('story-bg').value = croppedUrl;
       showToast('背景上传+裁剪完成nya~ ✨');
+      e.target.value = '';
+    });
+  };
+
+  // Story avatar upload
+  document.getElementById('btn-upload-story-avatar').onclick = () => {
+    document.getElementById('story-avatar-file').click();
+  };
+  document.getElementById('story-avatar-file').onchange = async (e) => {
+    uploadWithCrop(e.target, 'avatar', (croppedUrl) => {
+      document.getElementById('story-avatar').value = croppedUrl;
+      showToast('头像上传+裁剪完成nya~ ✨');
       e.target.value = '';
     });
   };
@@ -65,7 +84,8 @@ function openStoryCreate() {
       _narrativeStyle: style,
       _storyTitle: title,
       _storyChars: storyChars,
-      _storyBg: document.getElementById('story-bg').value.trim()
+      _storyBg: document.getElementById('story-bg').value.trim(),
+      _storyAvatar: document.getElementById('story-avatar').value.trim()
     };
 
     AppState.activeChat = {
@@ -84,7 +104,7 @@ function openStoryCreate() {
 
     // Show story info card
     const container = document.getElementById('messages-list');
-    const charNames = storyChars.map(c => `${getCharAvatar(c)} ${c.name}`).join('  ');
+    const charNames = storyChars.map(c => `<span style="display:inline-flex;vertical-align:middle;width:20px;height:20px;">${getCharAvatar(c)}</span> ${c.name}`).join('  ');
     container.innerHTML = `
       <div style="text-align:center;padding:30px;color:var(--text-secondary);">
         <div style="font-size:48px;margin-bottom:12px;">📖</div>
@@ -95,18 +115,31 @@ function openStoryCreate() {
       </div>
     `;
 
-    // Dummy register in chat index
+    // Add to local chat list immediately (optimistic update)
     const storyBg = document.getElementById('story-bg').value.trim();
-    try {
-      await apiPost('/api/chat/private', {
-        character_id: storyChars[0].id, chat_id: chatId, mode: 'story',
-        messages: [{ role: 'user', content: '' }],
-        api_key: AppState.settings.api_key || 'dummy',
-        base_url: AppState.settings.base_url, model: AppState.settings.model,
-        story_background: background, narrative_style: style, title: title,
-        chat_background: storyBg
-      });
-    } catch (e) {}
+    const storyAvatar = document.getElementById('story-avatar').value.trim();
+    const storyEntry = {
+      chat_id: chatId, type: 'story', mode: 'story',
+      title: title, target_id: storyChars[0].id,
+      last_message: '', last_time: new Date().toISOString(),
+      message_count: 0, story_background: background,
+      narrative_style: style, chat_background: storyBg,
+      story_avatar: storyAvatar,
+      story_chars: storyChars.map(c => ({ id: c.id, name: c.name }))
+    };
+    AppState.chats.unshift(storyEntry);
+
+    // Register on server in background (best-effort)
+    apiPost('/api/chats/register', {
+      chat_id: chatId, type: 'story', mode: 'story',
+      target_id: storyChars[0].id,
+      title: title, story_background: background,
+      narrative_style: style, chat_background: storyBg,
+      story_avatar: storyAvatar,
+      story_chars: storyChars.map(c => ({ id: c.id, name: c.name }))
+    }).then(async () => {
+      try { AppState.chats = await apiGet('/api/chats'); renderChatList(); } catch {}
+    }).catch(() => {});
 
     // Apply story background immediately
     if (storyBg) {
@@ -115,6 +148,10 @@ function openStoryCreate() {
     }
 
     document.getElementById('message-input').focus();
+    // Switch to stories tab and refresh
+    AppState.currentTab = 'stories';
+    document.querySelectorAll('.panel-tab').forEach(t => t.classList.toggle('active', t.dataset.tab === 'stories'));
+    renderChatList();
   };
 }
 
@@ -132,6 +169,34 @@ function openGroupCreate() {
   document.getElementById('group-name').value = '';
   openModal('modal-group-create');
 
+  // Avatar upload + gallery
+  document.getElementById('btn-upload-group-avatar').onclick = () => document.getElementById('group-avatar-file').click();
+  document.getElementById('group-avatar-file').onchange = (e) => {
+    uploadWithCrop(e.target, 'avatar', (url) => {
+      document.getElementById('group-avatar').value = url;
+      showToast('群头像上传完成 ✨');
+      e.target.value = '';
+    });
+  };
+  document.getElementById('btn-gallery-group-avatar').onclick = () => {
+    closeModal('modal-group-create');
+    setTimeout(() => openGallery('group-avatar', 'avatars'), 200);
+  };
+
+  // Background upload + gallery
+  document.getElementById('btn-upload-group-bg').onclick = () => document.getElementById('group-bg-file').click();
+  document.getElementById('group-bg-file').onchange = (e) => {
+    uploadWithCrop(e.target, 'background', (url) => {
+      document.getElementById('group-bg').value = url;
+      showToast('群背景上传完成 ✨');
+      e.target.value = '';
+    });
+  };
+  document.getElementById('btn-gallery-group-bg').onclick = () => {
+    closeModal('modal-group-create');
+    setTimeout(() => openGallery('group-bg', 'backgrounds'), 200);
+  };
+
   document.getElementById('btn-create-group').onclick = async () => {
     const name = document.getElementById('group-name').value.trim() || '新群聊';
     const checked = [...document.querySelectorAll('.group-char-check:checked')].map(cb => cb.value);
@@ -140,6 +205,7 @@ function openGroupCreate() {
     const groupData = {
       id: `group_${Date.now()}`,
       name, avatar: document.getElementById('group-avatar').value.trim(),
+      chat_background: document.getElementById('group-bg').value.trim(),
       type: 'group',
       members: checked
     };
@@ -216,17 +282,21 @@ function openCharEdit(charId = null) {
     };
     if (!data.name) { showToast('角色名不能为空nya~', 'error'); return; }
 
-    if (charId) {
-      await apiPut(`/api/characters/${charId}`, data);
-    } else {
-      await apiPost('/api/characters', data);
+    try {
+      if (charId) {
+        await apiPut(`/api/characters/${charId}`, data);
+      } else {
+        await apiPost('/api/characters', data);
+      }
+      AppState.characters = await apiGet('/api/characters');
+      closeModal('modal-char-edit');
+      renderSettingsCharList();
+      renderChatList();
+      renderWelcomeChars();
+      showToast('角色保存成功nya~ ✨');
+    } catch (e) {
+      showToast('保存失败: ' + (e.message || '未知错误'), 'error');
     }
-    AppState.characters = await apiGet('/api/characters');
-    closeModal('modal-char-edit');
-    renderSettingsCharList();
-    renderChatList();
-    renderWelcomeChars();
-    showToast('角色保存成功nya~ ✨');
   };
 
   document.getElementById('btn-delete-char').onclick = async () => {
@@ -258,6 +328,38 @@ function openGroupEdit(groupId = null) {
 
   document.getElementById('group-name').value = group?.name || '';
   document.getElementById('group-avatar').value = group?.avatar || '';
+  document.getElementById('group-bg').value = group?.chat_background || '';
+
+  // Avatar upload
+  document.getElementById('btn-upload-group-avatar').onclick = () => document.getElementById('group-avatar-file').click();
+  document.getElementById('group-avatar-file').onchange = (e) => {
+    uploadWithCrop(e.target, 'avatar', (url) => {
+      document.getElementById('group-avatar').value = url;
+      showToast('群头像上传完成 ✨');
+      e.target.value = '';
+    });
+  };
+
+  // Background upload
+  document.getElementById('btn-upload-group-bg').onclick = () => document.getElementById('group-bg-file').click();
+  document.getElementById('group-bg-file').onchange = (e) => {
+    uploadWithCrop(e.target, 'background', (url) => {
+      document.getElementById('group-bg').value = url;
+      showToast('群背景上传完成 ✨');
+      e.target.value = '';
+    });
+  };
+
+  // Gallery pickers
+  document.getElementById('btn-gallery-group-avatar').onclick = () => {
+    closeModal('modal-group-create');
+    setTimeout(() => openGallery('group-avatar', 'avatars'), 200);
+  };
+  document.getElementById('btn-gallery-group-bg').onclick = () => {
+    closeModal('modal-group-create');
+    setTimeout(() => openGallery('group-bg', 'backgrounds'), 200);
+  };
+
   document.getElementById('modal-group-create').querySelector('.modal-header h3').textContent =
     group ? '👥 编辑群组' : '👥 新建群组';
 
@@ -271,21 +373,26 @@ function openGroupEdit(groupId = null) {
     const groupData = {
       id: groupId || `group_${Date.now()}`,
       name, avatar: document.getElementById('group-avatar').value.trim(),
+      chat_background: document.getElementById('group-bg').value.trim(),
       type: 'group',
       members: checked
     };
 
-    if (groupId) {
-      await apiPut(`/api/groups/${groupId}`, groupData);
-    } else {
-      await apiPost('/api/groups', groupData);
+    try {
+      if (groupId) {
+        await apiPut(`/api/groups/${groupId}`, groupData);
+      } else {
+        await apiPost('/api/groups', groupData);
+      }
+      AppState.groups = await apiGet('/api/groups');
+      closeModal('modal-group-create');
+      renderSettingsGroupList();
+      renderChatList();
+      document.getElementById('modal-group-create').querySelector('.modal-header h3').textContent = '👥 新建群聊';
+      showToast('群组保存成功nya~ ✨');
+    } catch (e) {
+      showToast('保存失败: ' + (e.message || '未知错误'), 'error');
     }
-    AppState.groups = await apiGet('/api/groups');
-    closeModal('modal-group-create');
-    renderSettingsGroupList();
-    renderChatList();
-    document.getElementById('modal-group-create').querySelector('.modal-header h3').textContent = '👥 新建群聊';
-    showToast('群组保存成功nya~ ✨');
   };
 }
 
@@ -317,21 +424,25 @@ function openInviteMember() {
     if (checked.length === 0) { showToast('请至少选一个角色nya~', 'error'); return; }
 
     const newMembers = [...currentMembers, ...checked];
-    await apiPut(`/api/groups/${ac.target.id}`, {
-      ...ac.target,
-      members: newMembers
-    });
+    try {
+      await apiPut(`/api/groups/${ac.target.id}`, {
+        ...ac.target,
+        members: newMembers
+      });
 
-    // Refresh
-    AppState.groups = await apiGet('/api/groups');
-    const updatedGroup = AppState.groups.find(g => g.id === ac.target.id);
-    if (updatedGroup) {
-      ac.target = updatedGroup;
-      updateChatHeader();
+      // Refresh
+      AppState.groups = await apiGet('/api/groups');
+      const updatedGroup = AppState.groups.find(g => g.id === ac.target.id);
+      if (updatedGroup) {
+        ac.target = updatedGroup;
+        updateChatHeader();
+      }
+
+      closeModal('modal-invite-member');
+      showToast(`成功拉入 ${checked.length} 个角色nya~ ✨`);
+    } catch (e) {
+      showToast('拉人失败: ' + (e.message || '未知错误'), 'error');
     }
-
-    closeModal('modal-invite-member');
-    showToast(`成功拉入 ${checked.length} 个角色nya~ ✨`);
   };
 }
 

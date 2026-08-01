@@ -9,7 +9,8 @@ const AppState = {
     api_key: '', base_url: 'https://api.deepseek.com/v1',
     model: 'deepseek-chat', chat_background: '',
     ai_bubble_color: '#EDE4FF', user_bubble_color: '#FFB6C1',
-    font_size: 15, messages_per_page: 20, bg_opacity: 0.85
+    font_size: 15, messages_per_page: 20, bg_opacity: 0.35,
+    bubble_opacity: 1, diary_base: 40, diary_random: 20
   },
   characters: [],
   groups: [],
@@ -50,7 +51,11 @@ async function apiPut(url, data) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(data)
   });
-  return resp.json();
+  const json = await resp.json();
+  if (!resp.ok || json.error) {
+    throw new Error(json.error || `HTTP ${resp.status}`);
+  }
+  return json;
 }
 
 async function apiDelete(url) {
@@ -63,7 +68,8 @@ function applySettings() {
   document.documentElement.style.setProperty('--user-bubble', s.user_bubble_color);
   document.documentElement.style.setProperty('--ai-bubble', s.ai_bubble_color);
   document.documentElement.style.setProperty('--font-size-base', s.font_size + 'px');
-  document.documentElement.style.setProperty('--bg-opacity', (s.bg_opacity || 0.85));
+  document.documentElement.style.setProperty('--bg-opacity', (s.bg_opacity ?? 0.35));
+  document.documentElement.style.setProperty('--bubble-opacity', (s.bubble_opacity ?? 1));
 
   const chatArea = document.getElementById('chat-area');
   // Per-character or story background overrides global
@@ -139,14 +145,35 @@ function hideAvatarPreview() {
 }
 
 // Full image preview for album photos
-function showImagePreview(url) {
+function showImagePreview(url, idx) {
   const overlay = document.getElementById('avatar-preview-overlay');
   const content = document.getElementById('avatar-preview-content');
+  const ext = (url || '').split('.').pop().toLowerCase();
   _avatarZoom = 1;
-  content.innerHTML = `<img src="${url}" style="width:100%;height:100%;object-fit:contain;">`;
-  content.style.transform = 'scale(1)';
-  content.classList.add('image-preview');
+  _previewIndex = (idx != null) ? idx : -1;
+
+  const hasNav = _previewIndex >= 0 && typeof _albumPhotos !== 'undefined' && _albumPhotos.length > 1;
+  const prevBtn = hasNav ? `<button class="preview-nav preview-prev" onclick="event.stopPropagation();navigatePreview(-1)">◀</button>` : '';
+  const nextBtn = hasNav ? `<button class="preview-nav preview-next" onclick="event.stopPropagation();navigatePreview(1)">▶</button>` : '';
+  const counter = hasNav ? `<div class="preview-counter">${_previewIndex + 1} / ${_albumPhotos.length}</div>` : '';
+
+  if (['mp4','webm'].includes(ext)) {
+    content.innerHTML = `${prevBtn}${nextBtn}${counter}<video src="${url}" controls autoplay style="width:100%;height:100%;object-fit:contain;display:block;"></video>`;
+    content.style.transform = 'scale(1)';
+    content.classList.add('image-preview');
+  } else {
+    content.innerHTML = `${prevBtn}${nextBtn}${counter}<img src="${url}" style="max-width:90vw;max-height:80vh;object-fit:contain;">`;
+    content.style.transform = 'scale(1)';
+    content.classList.add('image-preview');
+  }
   overlay.classList.remove('hidden');
+}
+
+function navigatePreview(delta) {
+  if (_previewIndex < 0 || typeof _albumPhotos === 'undefined' || _albumPhotos.length === 0) return;
+  const newIdx = _previewIndex + delta;
+  if (newIdx < 0 || newIdx >= _albumPhotos.length) return;
+  showImagePreview(_albumPhotos[newIdx].url, newIdx);
 }
 
 // Wheel zoom on avatar preview
@@ -159,6 +186,15 @@ document.addEventListener('wheel', (e) => {
   const content = document.getElementById('avatar-preview-content');
   content.style.transform = `scale(${_avatarZoom})`;
 }, { passive: false });
+
+// Keyboard nav for preview
+document.addEventListener('keydown', (e) => {
+  const overlay = document.getElementById('avatar-preview-overlay');
+  if (overlay.classList.contains('hidden')) return;
+  if (e.key === 'ArrowLeft') { e.preventDefault(); navigatePreview(-1); }
+  if (e.key === 'ArrowRight') { e.preventDefault(); navigatePreview(1); }
+  if (e.key === 'Escape') hideAvatarPreview();
+});
 
 function getChatAvatar(chat) {
   if (chat.type === 'group') {
@@ -189,10 +225,11 @@ async function initApp() {
     AppState.groups = groups;
     AppState.chats = chats;
 
+    initParticles();
+    if (typeof initMusicPlayer === 'function') initMusicPlayer();
     applySettings();
     renderChatList();
     renderWelcomeChars();
-    initParticles();
 
     // If no chats, show welcome
     if (chats.length === 0) {
@@ -236,8 +273,9 @@ async function switchToChat(chatId, type, mode, target) {
   // Update header
   updateChatHeader();
 
-  // Clear messages
-  document.getElementById('messages-list').innerHTML = '';
+  // Clear everything aggressively
+  const list = document.getElementById('messages-list');
+  while (list.firstChild) list.removeChild(list.firstChild);
   document.getElementById('welcome-screen').classList.add('hidden');
   document.getElementById('load-more-area').classList.add('hidden');
 
@@ -286,15 +324,31 @@ function updateChatHeader() {
       : '👥';
     badge.classList.add('hidden');
     document.getElementById('btn-invite-member').classList.remove('hidden');
-    document.getElementById('btn-album').classList.add('hidden');
+    document.getElementById('btn-album').classList.remove('hidden');
+    document.getElementById('btn-diary').classList.remove('hidden');
   } else if (ac.type === 'story') {
-    titleEl.textContent = ac.target.name || '故事';
-    subtitleEl.textContent = AppState.activeChat.chat_id ? '故事模式' : '';
-    avatarEl.innerHTML = getCharAvatar(ac.target);
+    titleEl.textContent = ac.target._storyTitle || ac.target.name || '故事';
+    subtitleEl.textContent = '故事模式';
+    // Show story avatar if set, otherwise show character avatars
+    const storyAv = ac.target._storyAvatar;
+    if (storyAv && (storyAv.startsWith('/') || storyAv.startsWith('http'))) {
+      avatarEl.innerHTML = getCharAvatar({ id: 'story', avatar: storyAv });
+      avatarEl.querySelectorAll('img').forEach(img => {
+        img.style.width = '36px'; img.style.height = '36px';
+      });
+    } else {
+      const chars = ac.target._storyChars || AppState.characters;
+      avatarEl.innerHTML = chars.map(c => getCharAvatar(c)).join('') || '📖';
+      avatarEl.querySelectorAll('img').forEach(img => {
+        img.style.width = '20px'; img.style.height = '20px';
+      });
+    }
+    avatarEl.style.display = 'flex'; avatarEl.style.gap = '2px';
     badge.textContent = '📖 故事';
     badge.classList.remove('hidden');
     document.getElementById('btn-invite-member').classList.add('hidden');
-    document.getElementById('btn-album').classList.add('hidden');
+    document.getElementById('btn-album').classList.remove('hidden');
+    document.getElementById('btn-diary').classList.remove('hidden');
   } else {
     titleEl.textContent = ac.target.name || 'AI';
     subtitleEl.textContent = '在线';
@@ -342,16 +396,19 @@ function renderMessages() {
     let senderHtml = '';
     if (isUser) {
       senderHtml = `<div class="msg-sender msg-sender-user">${AppState.user.name || '我'}</div>`;
+    } else if (isStory) {
+      // Story: combined avatars like sendStoryMessage does
+      const chars = ac.target._storyChars || AppState.characters;
+      const av = chars.map(c => getCharAvatar(c)).join('');
+      avatarHtml = `<div class="msg-avatar-group">${av}</div>`;
+      senderHtml = `<span class="msg-sender-story">${charName}</span>`;
     } else {
       const av = (ac.type === 'group')
-        ? getCharAvatar(AppState.characters.find(c => c.name === charName))
+        ? getCharAvatar(AppState.characters.find(c => (msg.character_id && c.id === msg.character_id) || c.name === charName))
         : getCharAvatar(ac.target);
       avatarHtml = `<div class="msg-avatar">${av}</div>`;
       if (ac.type === 'group' || ac.type === 'private') {
         senderHtml = `<div class="msg-sender">${charName}</div>`;
-      }
-      if (isStory) {
-        senderHtml = `<span class="msg-sender-story">${charName}</span>`;
       }
     }
     return `
@@ -394,9 +451,8 @@ function addMessageToDom(role, content, charName, isStory) {
   if (isUser) {
     senderHtml = `<div class="msg-sender msg-sender-user">${AppState.user.name || '我'}</div>`;
   } else {
-    const av = charName
-      ? getCharAvatar(AppState.characters.find(c => c.name === charName))
-      : getCharAvatar(ac.target);
+    const char = charName ? AppState.characters.find(c => c.name === charName) : null;
+    const av = char ? getCharAvatar(char) : getCharAvatar(ac.target);
     avatarHtml = `<div class="msg-avatar">${av}</div>`;
     if ((ac.type === 'group' || ac.type === 'private') && charName) {
       senderHtml = `<div class="msg-sender">${charName}</div>`;
@@ -433,8 +489,8 @@ function createStreamingBubble(charName, charId) {
   const isStory = ac.mode === 'story';
   const bubbleClass = isStory ? 'bubble-story' : 'bubble-ai';
 
-  const av = charName
-    ? getCharAvatar(AppState.characters.find(c => c.name === charName))
+  const av = charId
+    ? getCharAvatar(AppState.characters.find(c => c.id === charId) || ac.target)
     : getCharAvatar(ac.target);
 
   let senderHtml = '';

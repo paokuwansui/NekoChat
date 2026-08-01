@@ -33,8 +33,12 @@ function openCropModal(imageUrl, type) {
   modal.classList.remove('hidden');
 
   const frame = document.getElementById('crop-frame');
-  // Fixed viewport: circle for avatar, rectangle for background
-  if (type === 'background') {
+  // Fixed viewport: circle for avatar, landscape for bg, portrait for diary
+  if (type === 'diary_bg') {
+    frame.style.width = '200px';
+    frame.style.height = '300px';
+    frame.style.borderRadius = '12px';
+  } else if (type === 'background') {
     frame.style.width = '340px';
     frame.style.height = '200px';
     frame.style.borderRadius = '12px';
@@ -126,7 +130,7 @@ function openCropModal(imageUrl, type) {
     canvas.toBlob(blob => {
       const fd = new FormData();
       fd.append('file', blob, 'crop_result.png');
-      fd.append('type', type === 'background' ? 'backgrounds' : 'avatars');
+      fd.append('type', (type === 'avatar') ? 'avatars' : 'backgrounds');
       fetch('/api/upload', { method: 'POST', body: fd })
         .then(r => r.json())
         .then(d => { if (d.status === 'ok' && _cropCallback) _cropCallback(d.path); })

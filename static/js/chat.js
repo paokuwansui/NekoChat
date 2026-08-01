@@ -2,6 +2,8 @@
    NekoChat — chat.js: 聊天核心 + SSE 流式处理
    ═══════════════════════════════════════════════ */
 
+let _storyBubbleId = 0;  // unique ID for story bubbles
+
 const inputEl = document.getElementById('message-input');
 const sendBtn = document.getElementById('btn-send');
 const atBtn = document.getElementById('btn-at-mention');
@@ -72,6 +74,26 @@ async function sendMessage() {
   inputEl.focus();
 }
 
+// ── Diary context injection ───────────────────
+async function injectDiaryContext(charIds) {
+  if (!charIds || charIds.length === 0) return [];
+  const injected = [];
+  for (const cid of charIds) {
+    try {
+      const resp = await fetch(`/api/diaries/visible/${cid}`);
+      if (!resp.ok) continue;
+      const diaries = await resp.json();
+      for (const d of diaries) {
+        injected.push({
+          role: 'user',
+          content: `【📔 ${d.owner_name}的日记 (${d.date})\n以下是${d.owner_name}写的一篇日记：】\n${d.content}`
+        });
+      }
+    } catch {}
+  }
+  return injected;
+}
+
 // ── Private Chat / Story SSE ────────────────────
 async function sendPrivateMessage(message) {
   const ac = AppState.activeChat;
@@ -81,12 +103,15 @@ async function sendPrivateMessage(message) {
   const { row: streamRow, contentEl: streamContent } = createStreamingBubble(null, 'main');
   streamContent.innerHTML = '<span class="typing-dot"></span><span class="typing-dot"></span><span class="typing-dot"></span>';
 
-  // Build context messages
+  // Build context messages (current user msg is already in ac.messages)
   const contextMessages = ac.messages.slice(-20).map(m => ({
     role: m.role,
     content: m.content
   }));
-  contextMessages.push({ role: 'user', content: message });
+
+  // Inject visible diaries for this character
+  const diaryMsgs = await injectDiaryContext([ac.target.id]);
+  contextMessages.unshift(...diaryMsgs);
 
   try {
     const resp = await fetch('/api/chat/private', {
@@ -162,10 +187,26 @@ async function sendPrivateMessage(message) {
     // Refresh chat list
     refreshChatList();
 
-    // Auto diary check
-    if (ac.mode !== 'story' && typeof checkDiaryAutoGenerate === 'function') {
-      checkDiaryAutoGenerate(ac.chat_id, ac.messages);
-    }
+    // Auto diary check (delayed to let SSE stream cleanup)
+    setTimeout(async () => {
+      try {
+        const resp = await fetch('/api/diaries/tick/' + ac.chat_id, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            messages: ac.messages.slice(-20),
+            api_key: AppState.settings.api_key,
+            base_url: AppState.settings.base_url,
+            model: AppState.settings.model,
+            character_name: ac.target?.name || 'AI'
+          })
+        });
+        const data = await resp.json();
+        if (data.generated) {
+          showToast('📔 自动生成了一篇新日记！点📔查看');
+        }
+      } catch {}
+    }, 100);
 
   } catch (err) {
     streamContent.innerHTML = `<span style="color:var(--error)">网络错误: ${err.message}</span>`;
@@ -179,6 +220,12 @@ async function sendGroupMessage(message) {
 
   // Determine responders (will be handled by backend @ detection)
   const history = ac.messages.slice(-10);
+
+  // Inject visible diaries for all group members
+  const diaryMsgs = await injectDiaryContext(group.members || []);
+  if (diaryMsgs.length > 0) {
+    history.unshift(...diaryMsgs);
+  }
 
   // Create streaming bubbles for each potential responder
   const memberIds = group.members || [];
@@ -260,9 +307,15 @@ async function sendGroupMessage(message) {
       ac.messages.push({
         role: 'assistant',
         content: text || '(空回复)',
-        character_name: char?.name || cid
+        character_name: char?.name || cid,
+        character_id: cid
       });
     });
+
+    // Auto diary check (delayed to let SSE stream cleanup)
+    if (typeof checkDiaryAutoGenerate === 'function') {
+      setTimeout(() => checkDiaryAutoGenerate(ac.chat_id, ac.messages), 100);
+    }
 
     refreshChatList();
 
@@ -279,37 +332,42 @@ async function sendStoryMessage(message) {
   const style = ac.target._narrativeStyle || '自然流畅';
 
   if (chars.length === 0) {
-    await sendPrivateMessage(message);
-    return;
+    // Fallback: use all available characters instead of crashing
+    chars = AppState.characters;
+    if (chars.length === 0) {
+      showToast('没有可用角色nya~', 'error');
+      sendBtn.disabled = false; inputEl.focus();
+      return;
+    }
   }
 
   // Build combined system prompt for all characters
   const charDescriptions = chars.map(c =>
-    `【${c.name}】\n性格：${c.system_prompt}\n`
+    `【${c.name}】${c.system_prompt}`
   ).join('\n');
   
-  const systemPrompt = `你是一个多角色故事叙述AI。你需要同时扮演以下角色，用他们的口吻回复：
+  const systemPrompt = `你是一个故事叙述AI。参考以下角色的性格设定来驱动叙事，用统一的叙述者视角回复一个完整的场景。
 
+【参考角色】
 ${charDescriptions}
 
 【故事设定】${bg}
 【叙事风格】${style}
 
-【格式要求】
-- 用以下格式回复，每个角色一段话：
-${chars.map(c => `${c.name}：（角色动作/心理描写 + 对话）`).join('\n')}
-- 角色之间可以有互动，前面角色说的话可以被后面角色接住
-- 整体是叙事风格，包括场景描写和动作描写
-- 每个角色2-4句话为宜`;
+在回复中自然地轮流展现角色的对话和动作，像写小说一样顺畅推进剧情。不需要固定格式，整体为叙事段落。`;
 
   const contextMessages = ac.messages.slice(-20).map(m => ({
     role: m.role, content: m.content
   }));
-  contextMessages.push({ role: 'user', content: message });
+
+  // Inject visible diaries for story characters
+  const storyDiaryMsgs = await injectDiaryContext(chars.map(c => c.id));
+  contextMessages.unshift(...storyDiaryMsgs);
 
   // Combined avatar + name display
   const avatarsHtml = chars.map(c => getCharAvatar(c)).join('');
   const namesStr = chars.map(c => c.name).join('、');
+  const storyId = `story-content-${++_storyBubbleId}`;
 
   // Create ONE streaming bubble with combined header
   const container = document.getElementById('messages-list');
@@ -324,7 +382,7 @@ ${chars.map(c => `${c.name}：（角色动作/心理描写 + 对话）`).join('\
   bodyDiv.className = 'msg-body';
   bodyDiv.innerHTML = `
     <div class="msg-sender">${namesStr}</div>
-    <div class="msg-bubble bubble-story" id="story-content"></div>
+    <div class="msg-bubble bubble-story" id="${storyId}"></div>
     <div class="msg-time"></div>
   `;
   
@@ -333,7 +391,7 @@ ${chars.map(c => `${c.name}：（角色动作/心理描写 + 对话）`).join('\
   container.appendChild(row);
   scrollToBottom();
 
-  const storyContent = document.getElementById('story-content');
+  const storyContent = document.getElementById(storyId);
   storyContent.innerHTML = '<span class="typing-dot"></span><span class="typing-dot"></span><span class="typing-dot"></span>';
 
   try {
@@ -341,11 +399,14 @@ ${chars.map(c => `${c.name}：（角色动作/心理描写 + 对话）`).join('\
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        character_id: chars[0].id, chat_id: ac.chat_id, mode: 'chat',
+        character_id: chars[0].id, chat_id: ac.chat_id, mode: 'story',
         messages: contextMessages,
         api_key: AppState.settings.api_key,
         base_url: AppState.settings.base_url, model: AppState.settings.model,
         temperature: 0.9,
+        story_background: bg, narrative_style: style,
+        title: ac.target._storyTitle || '', chat_background: ac.target._storyBg || '',
+        story_chars: chars.map(c => ({ id: c.id, name: c.name })),
         _system_override: systemPrompt
       })
     });
@@ -386,6 +447,11 @@ ${chars.map(c => `${c.name}：（角色动作/心理描写 + 对话）`).join('\
       content: fullResponse || '(空回复)',
       character_name: namesStr
     });
+
+    // Auto diary check (delayed to let SSE stream cleanup)
+    if (typeof checkDiaryAutoGenerate === 'function') {
+      setTimeout(() => checkDiaryAutoGenerate(ac.chat_id, ac.messages), 100);
+    }
 
   } catch (err) {
     storyContent.innerHTML = `<span style="color:var(--error)">${err.message}</span>`;

@@ -127,14 +127,6 @@
         <label>昵称</label>
         <input type="text" id="set-my-name" placeholder="我">
       </div>
-      <div class="form-group">
-        <label>头像</label>
-        <div class="avatar-upload">
-          <input type="file" id="set-my-avatar-file" accept="image/*" hidden>
-          <button id="btn-upload-my-avatar" class="btn-sm">📷 上传头像</button>
-          <input type="text" id="set-my-avatar" placeholder="或输入图片URL">
-        </div>
-      </div>
     </div>
 
     <!-- Section: API -->
@@ -174,7 +166,7 @@
       </div>
       <div class="form-group">
         <label>聊天背景透明度</label>
-        <input type="range" id="set-bg-opacity" min="30" max="95" value="85">
+        <input type="range" id="set-bg-opacity" min="0" max="95" value="35">
         <span id="bg-opacity-val">85%</span>
       </div>
       <div class="form-group">
@@ -186,9 +178,50 @@
         <input type="color" id="set-user-bubble" value="#FFB6C1">
       </div>
       <div class="form-group">
+        <label>气泡透明度</label>
+        <input type="range" id="set-bubble-opacity" min="20" max="100" value="100">
+        <span id="bubble-opacity-val">100%</span>
+      </div>
+      <div class="form-group">
         <label>字体大小</label>
         <input type="range" id="set-font-size" min="12" max="20" value="15">
         <span id="font-size-val">15px</span>
+      </div>
+    </div>
+
+    <!-- Section: Music -->
+    <div class="settings-section">
+      <h4>🎵 背景音乐</h4>
+      <div class="form-group">
+        <div style="display:flex;gap:4px;margin-bottom:6px;">
+          <select id="music-list" style="flex:1;" size="4"></select>
+          <div style="display:flex;flex-direction:column;gap:4px;">
+            <button id="btn-music-play" class="btn-sm">▶️</button>
+            <button id="btn-music-prev" class="btn-sm">⏮</button>
+            <button id="btn-music-next" class="btn-sm">⏭</button>
+          </div>
+        </div>
+        <div style="display:flex;gap:8px;align-items:center;margin-top:4px;">
+          <label style="font-size:12px;display:flex;align-items:center;gap:2px;">
+            <input type="radio" name="loop-mode" value="all" checked> 全部循环
+          </label>
+          <label style="font-size:12px;display:flex;align-items:center;gap:2px;">
+            <input type="radio" name="loop-mode" value="single"> 单首循环
+          </label>
+          <label style="font-size:12px;display:flex;align-items:center;gap:2px;">
+            <input type="radio" name="loop-mode" value="none"> 不循环
+          </label>
+        </div>
+        <div style="display:flex;gap:4px;margin-top:4px;">
+          <input type="range" id="music-volume" min="0" max="100" value="50" style="flex:1;">
+          <span id="music-volume-val" style="font-size:12px;min-width:36px;">50%</span>
+        </div>
+        <div style="display:flex;gap:4px;margin-top:6px;">
+          <button id="btn-upload-music" class="btn-sm">📤 上传</button>
+          <button id="btn-refresh-music" class="btn-sm">🔄 刷新</button>
+          <span id="music-status" style="font-size:11px;color:var(--text-secondary);"></span>
+        </div>
+        <input type="file" id="music-upload-file" accept="audio/*,.mp3,.wav,.ogg,.flac,.m4a" hidden multiple>
       </div>
     </div>
 
@@ -200,6 +233,21 @@
         <input type="number" id="set-page-size" min="5" max="50" value="20">
       </div>
       <button id="btn-clear-all-history" class="btn-sm btn-danger">🗑️ 清空所有历史</button>
+      <button id="btn-cleanup-uploads" class="btn-sm btn-danger" style="margin-top:8px;">🧹 清理未使用图片</button>
+    </div>
+
+    <!-- Section: Diary Settings -->
+    <div class="settings-section">
+      <h4>📔 日记自动生成</h4>
+      <div class="form-group">
+        <label>基础轮数</label>
+        <input type="number" id="set-diary-base" min="5" max="200" value="40">
+      </div>
+      <div class="form-group">
+        <label>随机额外轮数</label>
+        <input type="number" id="set-diary-random" min="0" max="100" value="20">
+        <span style="font-size:11px;color:var(--text-secondary);">实际轮数 = 基础 + 随机(0~额外)</span>
+      </div>
     </div>
 
     <!-- Section: Character Management -->
@@ -214,6 +262,13 @@
       <h4>👥 群组管理</h4>
       <div id="group-list-settings"></div>
       <button id="btn-add-group" class="btn-sm">➕ 新建群组</button>
+    </div>
+
+    <!-- Section: Story Management -->
+    <div class="settings-section">
+      <h4>📖 故事管理</h4>
+      <div id="story-list-settings"></div>
+      <button id="btn-add-story" class="btn-sm">➕ 新建故事</button>
     </div>
 
     <!-- Save -->
@@ -281,6 +336,14 @@
         <input type="text" id="story-title" placeholder="给故事起个名字...">
       </div>
       <div class="form-group">
+        <label>故事头像（可选）</label>
+        <div class="bg-input-row">
+          <input type="text" id="story-avatar" placeholder="📖 或留空使用默认">
+          <input type="file" id="story-avatar-file" accept="image/*" hidden>
+          <button id="btn-upload-story-avatar" class="btn-sm">📷</button>
+        </div>
+      </div>
+      <div class="form-group">
         <label>背景故事 / 世界观设定</label>
         <textarea id="story-background" rows="4" placeholder="描述故事的世界观、场景、初始设定...&#10;例如：你是一个在魔法学院上学的新生，今天是你第一天到校..."></textarea>
       </div>
@@ -297,11 +360,12 @@
       </div>
       <div class="form-group">
         <label>聊天背景（可选）</label>
-        <div class="avatar-upload">
+        <div class="bg-input-row">
           <input type="text" id="story-bg" placeholder="背景图URL或留空使用默认">
           <input type="file" id="story-bg-file" accept="image/*" hidden>
           <button id="btn-upload-story-bg" class="btn-sm">📷</button>
         </div>
+        <div id="story-bg-preview" class="bg-preview hidden"></div>
       </div>
       <button id="btn-create-story" class="btn-primary">✨ 开始故事</button>
     </div>
@@ -326,6 +390,16 @@
           <input type="text" id="group-avatar" placeholder="👥 或留空使用默认">
           <input type="file" id="group-avatar-file" accept="image/*" hidden>
           <button id="btn-upload-group-avatar" class="btn-sm">📷 上传</button>
+          <button id="btn-gallery-group-avatar" class="btn-sm">🖼️</button>
+        </div>
+      </div>
+      <div class="form-group">
+        <label>群聊天背景</label>
+        <div class="avatar-upload">
+          <input type="text" id="group-bg" placeholder="背景图URL或留空">
+          <input type="file" id="group-bg-file" accept="image/*" hidden>
+          <button id="btn-upload-group-bg" class="btn-sm">📷 上传</button>
+          <button id="btn-gallery-group-bg" class="btn-sm">🖼️</button>
         </div>
       </div>
       <div class="form-group">
@@ -442,7 +516,7 @@
         <input type="text" id="album-url" placeholder="图片URL或从🖼️选择" style="flex:1;">
         <button id="btn-album-gallery" class="btn-sm">🖼️</button>
         <button id="btn-album-upload" class="btn-sm">📤</button>
-        <input type="file" id="album-upload-file" accept="image/*" hidden>
+        <input type="file" id="album-upload-file" accept="image/*,video/*,audio/*,.webm,.mp4,.gif,.mp3,.wav,.ogg" hidden multiple>
       </div>
       <div class="form-group">
         <input type="text" id="album-caption" placeholder="说点什么...">
@@ -495,12 +569,18 @@
     <div class="modal-body">
       <input type="hidden" id="diary-edit-id">
       <div class="form-group">
-        <label>日记背景</label>
+        <label>日记背景（可选）</label>
         <div class="bg-input-row">
           <input type="text" id="diary-edit-bg" placeholder="留空使用默认">
-          <button id="btn-diary-bg-gallery" class="btn-sm">🖼️</button>
+          <input type="file" id="diary-edit-bg-file" accept="image/*" hidden>
+          <button id="btn-upload-diary-bg" class="btn-sm">📷</button>
         </div>
         <div id="diary-bg-preview" class="bg-preview hidden"></div>
+        <div style="display:flex;align-items:center;gap:8px;margin-top:6px;">
+          <label style="font-size:12px;white-space:nowrap;">透明度</label>
+          <input type="range" id="diary-bg-opacity" min="0" max="100" value="85" style="flex:1;">
+          <span id="diary-bg-opacity-val" style="font-size:12px;min-width:36px;">85%</span>
+        </div>
       </div>
       <div class="form-group">
         <label>可见角色（不选=仅自己可见）</label>
