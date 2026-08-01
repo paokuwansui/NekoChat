@@ -89,6 +89,7 @@
 ### 初始界面展示
 #### 私聊界面
 <img width="2553" height="1151" alt="屏幕截图 2026-08-01 233254" src="https://github.com/user-attachments/assets/5dbf2367-f177-45ad-b4d1-92cb7fcfc1ba" />
+
 #### 群聊界面
 <img width="2541" height="1155" alt="屏幕截图 2026-08-01 233400" src="https://github.com/user-attachments/assets/b048dbb9-006a-40f8-a12b-c7d1d3591c80" />
 
