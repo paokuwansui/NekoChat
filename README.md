@@ -3,6 +3,7 @@
 一个画风可爱、功能丰富的 AI 聊天 Web 应用。支持多角色私聊、群聊互动、故事模式叙事、AI 日记自动生成、相册、背景音乐等。
 
 纯前端原生 HTML/CSS/JS，后端 Flask + JSON 文件存储，零数据库依赖，开箱即用。
+（角色定义提示词，头像图片，聊天背景，相册都可以自定义哦，具体玩法请自己探索）
 
 ## ✨ 功能概览
 
@@ -82,6 +83,19 @@
 - 响应式布局（桌面/平板/手机）
 
 ---
+
+### 初始界面展示
+#### 私聊界面
+<img width="2553" height="1151" alt="屏幕截图 2026-08-01 233254" src="https://github.com/user-attachments/assets/5dbf2367-f177-45ad-b4d1-92cb7fcfc1ba" />
+#### 群聊界面
+<img width="2541" height="1155" alt="屏幕截图 2026-08-01 233400" src="https://github.com/user-attachments/assets/b048dbb9-006a-40f8-a12b-c7d1d3591c80" />
+
+#### 相册
+<img width="917" height="729" alt="屏幕截图 2026-08-01 233417" src="https://github.com/user-attachments/assets/e059c355-b88a-4943-8372-ea06da3d1ed3" />
+
+#### 日记
+<img width="1657" height="983" alt="屏幕截图 2026-08-01 233436" src="https://github.com/user-attachments/assets/1b6d0a64-6cc3-4dc5-9172-cdaab87cd989" />
+
 
 ## 🚀 快速开始
 
