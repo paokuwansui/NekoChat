@@ -327,7 +327,7 @@ async function sendGroupMessage(message) {
 // ── Story Chat (multi-character, single bubble) ──
 async function sendStoryMessage(message) {
   const ac = AppState.activeChat;
-  const chars = (ac.target && ac.target._storyChars) || [];
+  let chars = (ac.target && ac.target._storyChars) || [];
   const bg = ac.target._storyBackground || '';
   const style = ac.target._narrativeStyle || '自然流畅';
 
@@ -406,6 +406,7 @@ ${charDescriptions}
         temperature: 0.9,
         story_background: bg, narrative_style: style,
         title: ac.target._storyTitle || '', chat_background: ac.target._storyBg || '',
+        story_avatar: ac.target._storyAvatar || '',
         story_chars: chars.map(c => ({ id: c.id, name: c.name })),
         _system_override: systemPrompt
       })

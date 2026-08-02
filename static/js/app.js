@@ -123,7 +123,9 @@ function getCharAvatar(char) {
   const defaults = {
     'neko-chan': '🐱', 'kitsune': '🦊', 'usagi': '🐰', 'shiro': '🐶'
   };
-  return (char && defaults[char.id]) || '🤖';
+  if (char && defaults[char.id]) return defaults[char.id];
+  // Fallback: first char of name, or 🌟
+  return (char && char.name && char.name[0]) || '🌟';
 }
 
 // ── Avatar Preview ──────────────────────────────
@@ -670,10 +672,17 @@ document.addEventListener('DOMContentLoaded', () => {
   document.querySelector('[data-action="clear-chat"]').addEventListener('click', async () => {
     const ac = AppState.activeChat;
     if (ac.chat_id) {
-      await apiDelete(`/api/chats/${ac.chat_id}`);
+      await apiPost(`/api/chats/${ac.chat_id}/clear`, {});
       document.getElementById('messages-list').innerHTML = '';
       ac.messages = [];
       document.getElementById('welcome-screen').classList.remove('hidden');
+      // Update sidebar preview
+      const chatInList = AppState.chats.find(c => c.chat_id === ac.chat_id);
+      if (chatInList) {
+        chatInList.last_message = '';
+        chatInList.message_count = 0;
+      }
+      renderChatList();
       showToast('聊天已清空');
     }
   });

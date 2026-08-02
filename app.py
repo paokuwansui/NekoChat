@@ -112,6 +112,7 @@ def read_history(chat_id):
             match = re.match(r"\[(\d{2}:\d{2}:\d{2})\]\s+(.+?):\s+(.*)", line)
             if match:
                 timestamp, speaker, content = match.groups()
+                content = content.replace("\\n", "\n")  # 还原转义的换行
                 role = "user" if speaker in (user_name, "我") else "assistant"
                 msg = {"role": role, "content": content, "timestamp": timestamp}
                 if role == "assistant" and speaker != "AI":
@@ -161,7 +162,8 @@ def append_to_history(chat_id, message_text, speaker, timestamp=None):
                     char_name = char["name"] if char else "AI"
                     f.write(f"=== NekoChat Private Chat (聊天模式): 我 & {char_name} ===\n\n")
 
-        f.write(f"[{timestamp}] {speaker}: {message_text}\n")
+        safe = message_text.replace("\n", "\\n")
+        f.write(f"[{timestamp}] {speaker}: {safe}\n")
 
 
 def extract_mentions(message, group):
@@ -440,6 +442,24 @@ def chat_detail(chat_id):
         })
 
 
+# ─── clear chat history (keep metadata) ──────────────────────────
+
+@app.route("/api/chats/<chat_id>/clear", methods=["POST"])
+def clear_chat_history(chat_id):
+    """清空聊天记录，保留故事/群聊元数据"""
+    hist_path = get_history_path(chat_id)
+    if hist_path.exists():
+        hist_path.unlink()
+    # Update chat index: clear last_message
+    entry = get_chat_index(chat_id)
+    if entry:
+        entry["last_message"] = ""
+        entry["last_time"] = datetime.now().isoformat()
+        entry["message_count"] = 0
+        upsert_chat_index(entry)
+    return jsonify({"status": "ok"})
+
+
 # ─── undo last round ────────────────────────────────────────────
 
 @app.route("/api/chats/<chat_id>/undo", methods=["POST"])
@@ -605,6 +625,7 @@ def chat_private():
                 chat_entry["story_background"] = data.get("story_background", "")
                 chat_entry["narrative_style"] = data.get("narrative_style", "")
                 chat_entry["chat_background"] = data.get("chat_background", "")
+                chat_entry["story_avatar"] = data.get("story_avatar", "")
                 chat_entry["story_chars"] = data.get("story_chars", [])
             upsert_chat_index(chat_entry)
         except requests.exceptions.RequestException as e:

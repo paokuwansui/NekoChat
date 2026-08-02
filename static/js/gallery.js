@@ -7,6 +7,10 @@ async function openGallery(targetInputId, type) {
   _galleryTarget = targetInputId;
   document.getElementById('gallery-type-filter').value = type || 'backgrounds';
   await loadGalleryImages();
+  // If another modal is already open, push gallery to the top layer
+  if (document.querySelectorAll('.modal:not(.hidden)').length > 0) {
+    document.getElementById('modal-gallery').style.zIndex = '750';
+  }
   openModal('modal-gallery');
 }
 
@@ -53,6 +57,12 @@ function selectGalleryImage(path) {
     }
   }
   closeModal('modal-gallery');
+  // Reset gallery z-index
+  document.getElementById('modal-gallery').style.zIndex = '';
+  // If another modal is still open beneath gallery, re-show overlay
+  if (document.querySelectorAll('.modal:not(.hidden)').length > 0) {
+    document.getElementById('overlay').classList.remove('hidden');
+  }
 }
 
 // ── Album ───────────────────────────────────────
@@ -148,10 +158,9 @@ document.addEventListener('DOMContentLoaded', () => {
     addAlbumPhoto(url, caption);
   });
 
-  // Album gallery picker
+  // Album gallery picker — don't close album, open gallery on top
   document.getElementById('btn-album-gallery')?.addEventListener('click', () => {
-    closeModal('modal-album');
-    setTimeout(() => openGallery('album-url', 'backgrounds'), 200);
+    openGallery('album-url', 'backgrounds');
   });
 
   // Album upload (batch)
