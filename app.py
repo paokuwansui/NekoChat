@@ -106,7 +106,7 @@ def read_history(chat_id):
     with open(path, "r", encoding="utf-8") as f:
         for line in f:
             line = line.strip()
-            if not line or line.startswith("==="):
+            if not line or line.startswith("===") or line.startswith("角色:") or line.startswith("背景:") or line.startswith("风格:") or line.startswith("成员:"):
                 continue
             # 格式: [HH:MM:SS] 发言人: 内容
             match = re.match(r"\[(\d{2}:\d{2}:\d{2})\]\s+(.+?):\s+(.*)", line)
@@ -1313,47 +1313,53 @@ def reset_all():
 
 @app.route("/api/chats/import", methods=["POST"])
 def import_chat():
-    """Parse a pasted/uploaded chat txt and create a new chat entry."""
+    """导入聊天记录：追加记忆消息到指定对话"""
     data = request.get_json(force=True)
     chat_id = data.get("chat_id", "")
-    chat_type = data.get("type", "private")
-    mode = data.get("mode", "chat")
-    target_id = data.get("target_id", "")
-    content = data.get("content", "")  # raw txt content
+    content = data.get("content", "")
 
     if not chat_id or not content:
         return jsonify({"error": "缺少必要字段"}), 400
 
-    # Write the txt file
-    path = HISTORY_DIR / f"{chat_id}.txt"
-    with open(path, "w", encoding="utf-8") as f:
-        f.write(content)
-
-    # Parse messages for the index
-    messages = read_history(chat_id)
-    last_msg = ""
-    if messages:
-        last_msg = messages[-1]["content"][:80]
-
-    entry = {
-        "chat_id": chat_id,
-        "type": chat_type,
-        "mode": mode,
-        "target_id": target_id,
-        "last_message": last_msg,
-        "last_time": datetime.now().isoformat(),
-        "message_count": len(messages)
-    }
-    upsert_chat_index(entry)
-
-    # If story type, also save metadata
-    if chat_type == "story":
-        entry["title"] = data.get("title", "")
-        entry["story_background"] = data.get("story_background", "")
-        entry["narrative_style"] = data.get("narrative_style", "")
+    entry = get_chat_index(chat_id)
+    if not entry:
+        # 对话尚未创建（没有历史文件），自动建立
+        chat_type = data.get("type", "private")
+        mode = data.get("mode", "chat")
+        entry = {
+            "chat_id": chat_id,
+            "type": chat_type,
+            "mode": mode,
+            "target_id": data.get("target_id", ""),
+            "last_message": "",
+            "last_time": datetime.now().isoformat(),
+            "message_count": 0
+        }
         upsert_chat_index(entry)
 
-    return jsonify({"status": "ok", "chat_id": chat_id, "message_count": len(messages)})
+    # 构建记忆消息
+    prefix = "【以下是导入的历史对话记忆，请在后续对话中参考这些内容】\n\n"
+    memory_content = prefix + content
+
+    # 写入历史文件
+    append_to_history(chat_id, memory_content, "📥导入记忆", "00:00:00")
+
+    # 更新索引
+    messages = read_history(chat_id)
+    last_msg = messages[-1]["content"][:80] if messages else ""
+    entry = get_chat_index(chat_id)
+    if entry:
+        entry["last_message"] = last_msg
+        entry["last_time"] = datetime.now().isoformat()
+        entry["message_count"] = len(messages)
+        upsert_chat_index(entry)
+
+    return jsonify({
+        "status": "ok", "chat_id": chat_id,
+        "message_count": len(messages),
+        "messages": messages[-20:],  # 返回最近 20 条，前端直接渲染
+        "chats": read_json(DATA_DIR / "chats_index.json", [])  # 返回更新后的聊天列表
+    })
 
 
 # ─── test connection ────────────────────────────────────────────

@@ -331,21 +331,14 @@ function updateChatHeader() {
   } else if (ac.type === 'story') {
     titleEl.textContent = ac.target._storyTitle || ac.target.name || '故事';
     subtitleEl.textContent = '故事模式';
-    // Show story avatar if set, otherwise show character avatars
+    // Single avatar, same style as private chat
     const storyAv = ac.target._storyAvatar;
     if (storyAv && (storyAv.startsWith('/') || storyAv.startsWith('http'))) {
       avatarEl.innerHTML = getCharAvatar({ id: 'story', avatar: storyAv });
-      avatarEl.querySelectorAll('img').forEach(img => {
-        img.style.width = '36px'; img.style.height = '36px';
-      });
     } else {
-      const chars = ac.target._storyChars || AppState.characters;
-      avatarEl.innerHTML = chars.map(c => getCharAvatar(c)).join('') || '📖';
-      avatarEl.querySelectorAll('img').forEach(img => {
-        img.style.width = '20px'; img.style.height = '20px';
-      });
+      avatarEl.innerHTML = '📖';
     }
-    avatarEl.style.display = 'flex'; avatarEl.style.gap = '2px';
+    avatarEl.style.display = ''; avatarEl.style.gap = '';
     badge.textContent = '📖 故事';
     badge.classList.remove('hidden');
     document.getElementById('btn-invite-member').classList.add('hidden');
@@ -610,7 +603,7 @@ document.addEventListener('DOMContentLoaded', () => {
       }
       for (const m of messages) {
         const speaker = m.role === 'user' ? '我' : (m.character_name || ac.target?.name || 'AI');
-        txt += `[${m.timestamp || ''}] ${speaker}: ${m.content}\n`;
+        txt += `[${m.timestamp || ''}] ${speaker}: ${(m.content || '').replace(/\n/g, '\\n')}\n`;
       }
 
       const blob = new Blob([txt], { type: 'text/plain;charset=utf-8' });
@@ -633,36 +626,39 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('import-file-input').addEventListener('change', async (e) => {
     const file = e.target.files[0];
     if (!file) return;
+
+    const ac = AppState.activeChat;
+    if (!ac.chat_id) {
+      showToast('请先打开一个对话nya~', 'error');
+      e.target.value = '';
+      return;
+    }
+
     try {
       const content = await file.text();
-      // Build chat_id from filename
-      const chatId = file.name.replace(/\.txt$/i, '') + '_imported_' + Date.now();
 
-      // Determine type from content
-      let chatType = 'private';
-      let targetId = '';
-      const firstLine = content.split('\n')[0] || '';
-      if (firstLine.includes('Story')) chatType = 'story';
-      else if (firstLine.includes('Group')) chatType = 'group';
-
-      // Find target character from content
-      const nameMatch = firstLine.match(/我 & (.+?)===/) || firstLine.match(/角色: (.+)/);
-      if (nameMatch && chatType !== 'group') {
-        const found = AppState.characters.find(c => c.name === nameMatch[1].trim());
-        if (found) targetId = found.id;
-      }
-
-      await apiPost('/api/chats/import', {
-        chat_id: chatId,
-        type: chatType,
-        mode: chatType === 'story' ? 'story' : 'chat',
-        target_id: targetId,
+      const resp = await apiPost('/api/chats/import', {
+        chat_id: ac.chat_id,
+        type: ac.type || 'private',
+        mode: ac.mode || 'chat',
+        target_id: ac.target?.id || '',
         content: content
       });
+      const result = await resp.json();
 
-      AppState.chats = await apiGet('/api/chats');
+      if (!resp.ok) {
+        showToast('导入失败: ' + (result.error || '未知错误'), 'error');
+        e.target.value = '';
+        return;
+      }
+
+      // Use returned data directly — no extra requests
+      AppState.chats = result.chats;
+      AppState.activeChat.messages = result.messages || [];
       renderChatList();
-      showToast('导入成功nya~ 📤');
+      renderMessages();
+
+      showToast('历史记忆已导入 📥');
     } catch (err) {
       showToast('导入失败: ' + err.message, 'error');
     }
